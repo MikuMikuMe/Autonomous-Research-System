@@ -1,4 +1,4 @@
-# QMIND Agentic System
+# Bias Audit Pipeline
 
 A unified agentic pipeline for bias detection, mitigation, and auditing in financial AI systems. The system produces a technically verified research paper on bias in credit-card fraud detection, aligned with EU AI Act fairness thresholds. Agents run autonomously; a **Judge** evaluates quality (rule-based + optional Gemini semantic evaluation); failed agents are retried with feedback until they pass or exhaust retries.
 
@@ -7,7 +7,6 @@ A unified agentic pipeline for bias detection, mitigation, and auditing in finan
 ## Table of Contents
 
 - [Overview](#overview)
-- [6-Hour Research Game Plan](#6-hour-research-game-plan)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Components](#components)
@@ -24,30 +23,15 @@ A unified agentic pipeline for bias detection, mitigation, and auditing in finan
 
 ## Overview
 
-The pipeline implements a **6-hour research sprint** (see [howto.md](howto.md)): from dataset loading to a submission-ready paper with LaTeX and PDF. Each agent corresponds to specific hours and deliverables:
+The pipeline runs from dataset loading to a submission-ready paper with LaTeX and PDF (see [howto.md](howto.md)). Each agent corresponds to specific stages and deliverables:
 
-| Stage | Agent | Hours | Output |
-|-------|-------|-------|--------|
-| 1 | **Detection** | 1, 2 | Baseline models (LR, Balanced RF), fairness metrics, ROC curves, data splits |
-| 2 | **Mitigation** | 3 | SMOTE + XGBoost, threshold adjustment, comparative matrix, asymmetric cost analysis |
-| 3 | **Auditing** | 1–6 | Paper sections, Markdown draft, LaTeX paper, Hour 6 review |
+| Stage | Agent | Output |
+|-------|-------|--------|
+| 1 | **Detection** | Baseline models (LR, Balanced RF), fairness metrics, ROC curves, data splits |
+| 2 | **Mitigation** | SMOTE + XGBoost, threshold adjustment, comparative matrix, asymmetric cost analysis |
+| 3 | **Auditing** | Paper sections, Markdown draft, LaTeX paper, structure review |
 
 After each agent runs, the **Judge** evaluates its output. If the Judge fails an agent, the orchestrator retries (up to 3 times) with different random seeds. The pipeline stops on persistent failure.
-
----
-
-## 6-Hour Research Game Plan
-
-The pipeline is structured around the research sprint in [howto.md](howto.md):
-
-| Hour | Goal | Agent(s) | Deliverable |
-|------|------|----------|-------------|
-| **1** | Scope, setup, delegation | Detection, Mitigation, Auditing | Dataset loaded, SMOTE/threshold code ready, Intro & Background |
-| **2** | Baseline technical proof | Detection | LR + Balanced RF, DPD/EOD/DI metrics, baseline table |
-| **3** | Implementing mitigation | Mitigation | SMOTE + XGBoost, threshold adjustment, comparative matrix, asymmetric cost |
-| **4** | Drafting core sections | Auditing, Detection, Mitigation | Bias Auditing, Methodology, Results, figures exported, LaTeX paper |
-| **5** | Synthesis and discussion | Auditing | Discussion section (model selection, trade-off, post-processing limits) |
-| **6** | Review, format, citations | Auditing | Structure review, formula check, citation research (Gemini + Google Search) |
 
 ---
 
@@ -64,14 +48,14 @@ The pipeline is structured around the research sprint in [howto.md](howto.md):
          ▼                         ▼                         ▼
 ┌──────────────────┐    ┌──────────────────┐    ┌──────────────────────────┐
 │ Detection Agent  │    │ Mitigation Agent  │    │ Auditing Agent            │
-│ (Hours 1–2)      │    │ (Hours 3–4)      │    │ (Hours 1–6)               │
+│                  │    │                  │    │                            │
 │                  │    │                  │    │                            │
 │ • Kaggle dataset │    │ • Load baseline  │    │ • Intro, Background       │
 │ • Synthetic attr │    │ • SMOTE          │    │ • Methodology, Results   │
 │ • LR, BRF        │    │ • XGBoost        │    │ • Audit Framework         │
-│ • Fairness metrics│   │ • Threshold adj  │    │ • Discussion (Hour 5)     │
-│ • ROC, bar charts│    │ • Asymmetric cost│    │ • LaTeX + PDF (Hour 4)    │
-│ • npz, json      │    │ • Figures        │    │ • Hour 6 review           │
+│ • Fairness metrics│   │ • Threshold adj  │    │ • Discussion              │
+│ • ROC, bar charts│    │ • Asymmetric cost│    │ • LaTeX + PDF             │
+│ • npz, json      │    │ • Figures        │    │ • Structure review        │
 └────────┬─────────┘    └────────┬─────────┘    └────────────┬─────────────────┘
          │                      │                          │
          └──────────────────────┼──────────────────────────┘
@@ -98,12 +82,12 @@ QMIND-Agent/
 ├── orchestrator.py          # Main entry: runs pipeline + Judge loop (CLI)
 ├── run_gui.py               # GUI entry: web dashboard
 ├── judge_agent.py            # Quality evaluation (rule-based + Gemini)
-├── detection_agent.py        # Bias detection (Hours 1–2)
-├── mitigation_agent.py       # Bias mitigation (Hours 3–4)
-├── auditing_agent.py         # Paper generation (Hours 1–6)
-├── llm_client.py             # Gemini API client (Judge, Hour 6)
+├── detection_agent.py        # Bias detection
+├── mitigation_agent.py       # Bias mitigation
+├── auditing_agent.py         # Paper generation
+├── llm_client.py             # Gemini API client (Judge)
 ├── latex_generator.py        # LaTeX paper with figures, formulas, bibliography
-├── hour6_review.py           # Hour 6: structure review, citation research
+├── structure_review.py           # Structure review, citation research
 ├── gui/                      # Web dashboard
 │   ├── server.py             # FastAPI + WebSocket
 │   ├── streaming_orchestrator.py
@@ -111,7 +95,7 @@ QMIND-Agent/
 ├── requirements.txt
 ├── README.md                 # This document
 ├── SETUP.md                  # Setup (venv, Kaggle, LaTeX, Gemini)
-├── howto.md                  # 6-hour research sprint guide
+├── howto.md                  # Research workflow guide
 ├── kaggle.json.example       # Kaggle credential template
 ├── env.example               # Gemini API key template
 ├── docs/
@@ -144,7 +128,7 @@ QMIND-Agent/
     │   ├── paper.tex
     │   ├── paper.pdf          # If pdflatex installed
     │   └── references.bib
-    └── hour6_review.json
+    └── structure_review.json
 ```
 
 ---
@@ -180,17 +164,17 @@ QMIND-Agent/
 ### Mitigation Agent (`mitigation_agent.py`)
 
 - **Role:** Load Detection outputs, apply SMOTE, train XGBoost, apply threshold adjustment, produce comparative matrix and asymmetric cost analysis.
-- **Hours:** 1 (setup), 2 (load baseline), 3 (mitigation), 4 (export figures)
+- **Phases:** Setup, load baseline, mitigation, export figures
 - **Input:** `data_splits.npz`, `baseline_results.json`
 - **Output:** `mitigation_results.json`, `mitigation_comparison.png`, `figures/fig_mitigation_comparison.{png,pdf}`
 - **CLI:** `python mitigation_agent.py [seed]`
 
 ### Auditing Agent (`auditing_agent.py`)
 
-- **Role:** Generate paper sections from templates + Detection/Mitigation JSON, compile draft, generate LaTeX, run Hour 6 review.
-- **Hours:** 1 (Intro, Background), 2 (Methodology), 4 (LaTeX), 5 (Discussion), 6 (Review)
+- **Role:** Generate paper sections from templates + Detection/Mitigation JSON, compile draft, generate LaTeX, run structure review.
+- **Phases:** Intro/Background, Methodology, LaTeX, Discussion, structure review
 - **Input:** `baseline_results.json`, `mitigation_results.json`
-- **Output:** `paper_sections/*.md`, `paper_draft.md`, `paper/paper.tex`, `paper/paper.pdf`, `hour6_review.json`
+- **Output:** `paper_sections/*.md`, `paper_draft.md`, `paper/paper.tex`, `paper/paper.pdf`, `structure_review.json`
 - **CLI:** `python auditing_agent.py`
 
 ### LLM Client (`llm_client.py`)
@@ -205,11 +189,11 @@ QMIND-Agent/
 - **Role:** Generate publication-ready LaTeX paper in **IEEE/CUCAI 2026 format** (IEEEtran, two-column, IEEE-style citations) with figures, formulas (SPD, DI, EOD, Accuracy, F1), tables, bibliography.
 - **Output:** `outputs/paper/paper.tex`, `outputs/paper/paper.pdf` (if pdflatex installed)
 
-### Hour 6 Review (`hour6_review.py`)
+### Structure Review (`structure_review.py`)
 
 - **Role:** Review paper structure, verify formulas, run citation research via Gemini + Google Search grounding.
-- **Output:** `outputs/hour6_review.json`
-- **CLI:** `python hour6_review.py`
+- **Output:** `outputs/structure_review.json`
+- **CLI:** `python structure_review.py` (structure review)
 
 ---
 
@@ -296,7 +280,7 @@ When `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) is set:
 
 Returns PASS/FAIL with reasoning; can fail on semantic issues even if rule-based checks pass.
 
-### Auditing Hour 6
+### Structure Review
 
 - **Structure review:** Verifies required sections (Background, Use Case, Detection, Mitigation, Audit, Discussion) and formulas (Demographic Parity, Disparate Impact, Equalized Odds, Accuracy, F1).
 - **Citation research:** Uses Gemini with Google Search grounding to find recent (2023–2025) papers supporting the claims.
@@ -304,6 +288,16 @@ Returns PASS/FAIL with reasoning; can fail on semantic issues even if rule-based
 **Setup:** See [SETUP.md](SETUP.md). Model override: `GEMINI_MODEL=gemini-2.0-flash` (default: `gemini-1.5-pro`).
 
 ---
+
+## ArXiv MCP (Optional)
+
+For Cursor chat: search and read arXiv papers via [arxiv-mcp-server](https://github.com/blazickjp/arxiv-mcp-server).
+
+```bash
+uv tool install arxiv-mcp-server
+```
+
+Add to `.cursor/mcp.json` (see `.cursor/mcp.json.example`). See [docs/ARXIV_MCP_SETUP.md](docs/ARXIV_MCP_SETUP.md).
 
 ## alphaXiv MCP (Optional)
 
@@ -373,7 +367,7 @@ python mitigation_agent.py [seed]
 python auditing_agent.py
 python judge_agent.py [detection|mitigation|auditing]
 python judge_agent.py               # evaluate all
-python hour6_review.py              # Hour 6 review standalone
+python structure_review.py              # Structure review standalone
 ```
 
 ### Optional Setup
@@ -395,7 +389,7 @@ python hour6_review.py              # Hour 6 review standalone
 | `outputs/figures/*.pdf` | Publication-ready figures |
 | `outputs/baseline_results.json` | Detection metrics |
 | `outputs/mitigation_results.json` | Mitigation metrics + asymmetric cost |
-| `outputs/hour6_review.json` | Hour 6 structure + citation research |
+| `outputs/structure_review.json` | Structure review + citation research |
 
 ---
 
@@ -440,6 +434,7 @@ Add `config.yaml` and load in orchestrator and judge; pass to agents via env or 
 | Pipeline stops at Detection | Detection fails 3 times | Run `python judge_agent.py detection` for feedback |
 | Gemini not used | No API key | Set `GOOGLE_API_KEY` (see SETUP.md) |
 | PDF not generated | pdflatex not installed | Install MiKTeX/TeX Live or compile manually |
+| LaTeX step appears stuck | Gemini API or pdflatex is slow | **Normal:** Gemini ~1–2 min, pdflatex ~30s. Wait. **If >5 min:** Check `GOOGLE_API_KEY`; run `python latex_generator.py` standalone to isolate; Ctrl+C and re-run. |
 
 ---
 
@@ -458,8 +453,8 @@ python auditing_agent.py
 python judge_agent.py [detection|mitigation|auditing]
 python judge_agent.py   # evaluate all
 
-# Hour 6 review
-python hour6_review.py
+# Structure review
+python structure_review.py
 ```
 
-See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup. See [howto.md](howto.md) for the 6-hour research game plan.
+See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup. See [howto.md](howto.md) for the research workflow.

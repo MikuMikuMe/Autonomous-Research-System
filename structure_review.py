@@ -1,5 +1,5 @@
 """
-Hour 6: Review, Format, and Citations
+Structure Review: Review, Format, and Citations
 Uses Gemini to:
 - Verify paper structure (Background, Use Case, Detection, Mitigation, Audit, Discussion)
 - Check formulas are present (Demographic Parity, Disparate Impact, Equalized Odds, Accuracy, F1)
@@ -51,7 +51,7 @@ def run_structure_review(draft_text: str) -> dict | None:
 
     preview = draft_text[:10000] + "..." if len(draft_text) > 10000 else draft_text
 
-    prompt = f"""You are a research paper reviewer. Check this draft for Hour 6 compliance.
+    prompt = f"""You are a research paper reviewer. Check this draft for structure compliance.
 
 **Required structure (in order):** {", ".join(REQUIRED_STRUCTURE)}
 **Required formulas in methodology:** {", ".join(REQUIRED_FORMULAS)}
@@ -109,7 +109,7 @@ Respond with a structured list. If no recent papers found, say so.
 
 
 def run_full_review(draft_path: str = None, use_research: bool = True) -> dict:
-    """Run Hour 6 review: structure check + optional citation research."""
+    """Run structure review: structure check + optional citation research."""
     draft_path = draft_path or os.path.join(OUTPUT_DIR, "paper_draft.md")
     draft = _read_file(draft_path)
 
@@ -153,7 +153,7 @@ def run_full_review(draft_path: str = None, use_research: bool = True) -> dict:
 
 
 def format_review_report(review: dict) -> str:
-    """Format the Hour 6 review as a readable report."""
+    """Format the structure review as a readable report."""
     lines = ["=" * 60, "  Review, Format, and Citations", "=" * 60]
 
     struct = review.get("structure_review")

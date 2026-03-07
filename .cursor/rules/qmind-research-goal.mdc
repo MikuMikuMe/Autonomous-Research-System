@@ -3,7 +3,7 @@ description:
 alwaysApply: true
 ---
 
-# QMIND Research Goal
+# Bias Audit Pipeline — Research Goal
 
 This project aims to **write a research paper on how bias is introduced into modern AI systems**, with a focus on **financial AI**, and to **technically prove the findings** in the research paper.
 

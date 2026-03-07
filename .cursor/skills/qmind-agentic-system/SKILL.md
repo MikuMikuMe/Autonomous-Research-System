@@ -1,9 +1,9 @@
 ---
 name: qmind-agentic-system
-description: Run the unified agentic pipeline for bias detection, mitigation, and auditing. Use when the user wants to run the full pipeline, orchestrate agents, or execute the QMIND research workflow autonomously.
+description: Run the unified agentic pipeline for bias detection, mitigation, and auditing. Use when the user wants to run the full pipeline, orchestrate agents, or execute the Bias Audit Pipeline workflow autonomously.
 ---
 
-# QMIND Agentic System
+# Bias Audit Pipeline
 
 ## Run the Full Pipeline
 
@@ -35,7 +35,7 @@ If any core agent fails the judge, the orchestrator retries (up to 3 times) with
 
 - `outputs/paper_draft.md` — Full paper (Markdown)
 - `outputs/paper_sections/*.md` — Individual sections
-- `outputs/paper/paper.tex` — LaTeX source (Hour 4)
+- `outputs/paper/paper.tex` — LaTeX source
 - `outputs/paper/paper.pdf` — Compiled PDF (if pdflatex installed)
 - `outputs/figures/*.pdf` — Publication-ready figures (ROC, fairness charts)
 - `outputs/baseline_results.json`, `mitigation_results.json`
@@ -48,7 +48,7 @@ python detection_agent.py [seed]   # default seed=42
 python mitigation_agent.py [seed]
 python auditing_agent.py
 python judge_agent.py [detection|mitigation|auditing]
-python hour6_review.py             # Hour 6 review (structure + citation research)
+python structure_review.py        # Structure review (structure + citation research)
 python format_check_agent.py       # Validate paper/JSON format; use --fix to auto-correct
 ```
 

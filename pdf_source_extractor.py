@@ -24,6 +24,24 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _truncate_at_sentence_boundary(text: str, max_chars: int) -> str:
+    """
+    Truncate text at a sentence boundary to avoid mid-sentence cuts.
+    Prevents white chunks and incomplete content in the paper.
+    """
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    # Find last sentence-ending punctuation
+    last_period = cut.rfind(". ")
+    last_excl = cut.rfind("! ")
+    last_quest = cut.rfind("? ")
+    last_end = max(last_period, last_excl, last_quest)
+    if last_end > max_chars * 0.5:  # Only use if we keep at least half
+        return text[: last_end + 1].strip()
+    return cut.strip()
+
+
 def _extract_citations(text: str) -> list[dict]:
     """Extract author-year citations and DOIs from text."""
     citations = []
@@ -147,12 +165,13 @@ def get_passage_for_topic(topic_keywords: list[str], source_pdf: str | None = No
                 if idx >= 0:
                     start = max(0, idx - 200)
                     end = min(len(text), idx + max_chars)
-                    best = text[start:end]
+                    raw = text[start:end]
+                    best = _truncate_at_sentence_boundary(raw, max_chars)
                     if len(best) < 100:
-                        best = text[:max_chars]
+                        best = _truncate_at_sentence_boundary(text[:max_chars], max_chars)
                     break
             if not best and score > 0:
-                best = text[:max_chars]
+                best = _truncate_at_sentence_boundary(text[:max_chars], max_chars)
     return best
 
 
@@ -177,12 +196,13 @@ def get_passages_from_all_pdfs(topic_keywords: list[str], max_chars_per_pdf: int
             if idx >= 0:
                 start = max(0, idx - 200)
                 end = min(len(text), idx + max_chars_per_pdf)
-                best = text[start:end]
+                raw = text[start:end]
+                best = _truncate_at_sentence_boundary(raw, max_chars_per_pdf)
                 if len(best) < 100:
-                    best = text[:max_chars_per_pdf]
+                    best = _truncate_at_sentence_boundary(text[:max_chars_per_pdf], max_chars_per_pdf)
                 break
         if not best:
-            best = text[:max_chars_per_pdf]
+            best = _truncate_at_sentence_boundary(text[:max_chars_per_pdf], max_chars_per_pdf)
         results.append({"pdf_name": name, "passage": best.strip()})
     return results
 

@@ -153,6 +153,26 @@ def check_garbled_text(text: str, source: str = "") -> list[str]:
     return issues
 
 
+def check_incomplete_content(text: str, source: str = "") -> list[str]:
+    """
+    Detect incomplete/truncated content that causes white chunks in the PDF.
+    Delegates to paper_quality_guardrail when available.
+    """
+    try:
+        from paper_quality_guardrail import (
+            check_incomplete_sentences,
+            check_truncated_starts,
+            check_duplicate_incomplete_fragments,
+        )
+        issues = []
+        issues.extend(check_incomplete_sentences(text, source))
+        issues.extend(check_truncated_starts(text, source))
+        issues.extend(check_duplicate_incomplete_fragments(text, source))
+        return issues
+    except ImportError:
+        return []
+
+
 def check_markdown_syntax(text: str, source: str = "") -> list[str]:
     """Basic markdown structure checks."""
     issues = []
@@ -274,6 +294,7 @@ def run_format_check(paper_only: bool = False, json_only: bool = False) -> dict:
             issues.extend(check_threshold_footnote(draft))
             issues.extend(check_garbled_text(draft, "paper_draft.md"))
             issues.extend(check_markdown_syntax(draft, "paper_draft.md"))
+            issues.extend(check_incomplete_content(draft, "paper_draft.md"))
             if any("SPD Viol" not in str(t.get("headers", [])) for t in tables):
                 fixes.append("Rename table violation columns to 'SPD Viol' and 'EOD Viol'.")
         else:
@@ -291,6 +312,9 @@ def run_format_check(paper_only: bool = False, json_only: bool = False) -> dict:
         tex_path = os.path.join(OUTPUT_DIR, "paper", "paper.tex")
         if os.path.exists(tex_path):
             issues.extend(check_latex_basic(tex_path))
+            tex_content = _read_file(tex_path)
+            if tex_content:
+                issues.extend(check_incomplete_content(tex_content, "paper.tex"))
 
     if not paper_only:
         # JSON

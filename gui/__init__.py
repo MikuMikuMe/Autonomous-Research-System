@@ -1,1 +1,1 @@
-# QMIND GUI package
+# Bias Audit Pipeline GUI package

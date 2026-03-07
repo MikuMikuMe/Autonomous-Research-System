@@ -1,4 +1,4 @@
-# QMIND Research Paper — Coverage Checklist
+# Bias Audit Pipeline — Research Paper Coverage Checklist
 
 This checklist ensures the paper addresses every point from the research outlines. Use it when generating or revising sections. When alphaXiv MCP is enabled, search for papers to support each claim.
 

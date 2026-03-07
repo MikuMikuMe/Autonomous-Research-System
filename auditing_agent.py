@@ -100,6 +100,17 @@ def _metrics_table(metrics_list, caption=""):
 # ====================================================================
 
 
+def _truncate_combined_at_sentence(text: str, max_chars: int) -> str:
+    """Truncate at sentence boundary to prevent incomplete content in paper."""
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    last_end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    if last_end > max_chars * 0.5:
+        return text[: last_end + 2].strip()
+    return cut.strip()
+
+
 def _merge_passages_with_gemini(passages: list[dict], topic: str) -> str:
     """
     When multiple PDFs have overlapping content for a topic, use Gemini to merge
@@ -121,6 +132,8 @@ def _merge_passages_with_gemini(passages: list[dict], topic: str) -> str:
     combined = "\n\n---\n\n".join(
         f"[From {p['pdf_name']}]\n{p['passage']}" for p in passages
     )
+    # Truncate at sentence boundary to prevent incomplete content (paper quality guardrail)
+    combined_safe = _truncate_combined_at_sentence(combined, 12000)
     prompt = f"""Merge these passages from our reference PDFs about "{topic}".
 RULES:
 1. PRESERVE original wording from the documents as much as possible.
@@ -128,10 +141,11 @@ RULES:
 3. Keep key terms, definitions, and citations exactly as written.
 4. Output a single coherent passage suitable for a research paper. No bullet points or headers.
 5. Do not add "From X" attributions in the output — integrate seamlessly.
+6. COMPLETENESS: Output MUST end with a complete sentence (., !, or ?). Never end with "particularly", "the key", "by 0.015", "far exceeding EU", or any fragment.
 
 Passages:
 ---
-{combined[:12000]}
+{combined_safe}
 ---
 
 Merged passage:"""
@@ -964,16 +978,31 @@ def main():
     # ---- LaTeX paper with figures ----
     print("\n  LaTeX paper generation & compilation")
     print("  " + "-" * 40)
+    print("  (If this appears stuck: Gemini API ~1–2 min, pdflatex ~30s. See README Troubleshooting.)")
     _progress(0.7, "LaTeX paper generation")
     try:
         from latex_generator import generate_paper_tex, compile_latex
+        print("  [1/2] Generating LaTeX from Markdown...", flush=True)
         tex_path = generate_paper_tex(baseline_data, mitigation_data)
-        print(f"  LaTeX source: {tex_path}")
+        print(f"  [1/2] Done. LaTeX source: {tex_path}", flush=True)
+        _progress(0.75, "LaTeX compilation")
+        print("  [2/2] Compiling PDF (pdflatex + bibtex)...", flush=True)
         ok, msg = compile_latex()
         if ok:
-            print(f"  PDF compiled: {msg}")
+            print(f"  [2/2] Done. PDF compiled: {msg}", flush=True)
+            # Paper quality guardrail — fail if incomplete content detected
+            try:
+                from paper_quality_guardrail import run_paper_quality_guardrail
+                guard = run_paper_quality_guardrail(check_markdown=True, check_latex=True)
+                if not guard["passed"]:
+                    print("\n  ⚠ PAPER QUALITY GUARDRAIL FAILED — incomplete content detected:", flush=True)
+                    for issue in guard["issues"]:
+                        print(f"    - {issue}", flush=True)
+                    print("  Fix these to prevent white chunks in the PDF. Re-run pipeline after fixes.", flush=True)
+            except ImportError:
+                pass
         else:
-            print(f"  LaTeX source saved; PDF skipped ({msg})")
+            print(f"  [2/2] LaTeX source saved; PDF skipped ({msg})", flush=True)
     except ImportError as e:
         print(f"  [ ] LaTeX generator not available: {e}")
 
@@ -982,11 +1011,11 @@ def main():
     print("  " + "-" * 40)
     _progress(0.9, "Review & citations")
     try:
-        from hour6_review import run_full_review, format_review_report
+        from structure_review import run_full_review, format_review_report
         review = run_full_review(use_research=True)
         report = format_review_report(review)
         print(report)
-        review_path = os.path.join(OUTPUT_DIR, "hour6_review.json")
+        review_path = os.path.join(OUTPUT_DIR, "structure_review.json")
         with open(review_path, "w", encoding="utf-8") as f:
             json.dump(
                 {k: v for k, v in review.items() if v is not None and isinstance(v, (dict, list, str, int, float, bool))},

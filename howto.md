@@ -1,11 +1,11 @@
 
 
 
-Writing and technically proving a research paper in 6 hours is essentially a "hackathon" sprint. Because you have a team (Mihailo, Kai Kim, Alec, Viona, Gopika, and Maya) and well-structured preliminary notes, you can parallelize the work. 
+Writing and technically proving a research paper in a sprint requires parallelization. With a team (Mihailo, Kai Kim, Alec, Viona, Gopika, and Maya) and well-structured preliminary notes, you can parallelize the work. 
 
-To prove your findings technically within this strict timeframe, you must avoid building algorithms from scratch. Instead, you should use standard datasets and existing fairness libraries (like IBM's `AIF360` or Microsoft's `fairlearn`). 
+To prove your findings technically, avoid building algorithms from scratch. Instead, use standard datasets and existing fairness libraries (like IBM's `AIF360` or Microsoft's `fairlearn`). 
 
-Here is your **6-Hour Game Plan** to write the paper and generate the technical proofs, based on the provided literature and team structure:
+Here is the **research workflow** to write the paper and generate the technical proofs, based on the provided literature and team structure:
 
 ### Hour 1: Scope Definition, Setup & Delegation
 **Goal:** Lock in the narrative and set up the technical environment.
@@ -66,7 +66,7 @@ Here is your **6-Hour Game Plan** to write the paper and generate the technical 
 *   Insert your formulas (Demographic Parity, Disparate Impact, Equalized Odds, Accuracy, F1 Score) directly from your notes into the methodology section to add academic rigor.
 *   Compile the bibliography using the references provided in your notes (e.g., *Pagano et al., 2023; Ntoutsi et al., 2020; Huang & Turetken, 2025*).
 
-### Technical "Cheat Sheet" for your 6-Hour Window:
+### Technical Cheat Sheet:
 To save time on the code, tell your detection and mitigation teams to use the following Python snippet structure using `fairlearn`:
 
 ```python
@@ -89,4 +89,4 @@ mitigated_model = XGBClassifier().fit(X_res, y_res)
 # Re-run metrics to prove mitigation success
 ```
 
-By strictly keeping the team in their lanes (Detection, Mitigation, Auditing/Writing) and relying heavily on the pre-written literature reviews and equations in your notes, you can successfully output a technically verified paper in 6 hours.
+By strictly keeping the team in their lanes (Detection, Mitigation, Auditing/Writing) and relying heavily on the pre-written literature reviews and equations in your notes, you can successfully output a technically verified paper.

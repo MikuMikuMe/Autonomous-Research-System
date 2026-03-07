@@ -13,11 +13,26 @@ OUTPUT_DIR = os.path.join(SCRIPT_DIR, "outputs")
 def collect_ieee_citations() -> list[dict]:
     """
     Collect all papers_used from research_findings.json and coverage_suggestions.json.
+    Prioritizes paper_to_cite from claim_comparison (whose claim is more supported).
     Deduplicates by title. Returns list of {title, ieee_citation, source}.
     """
     seen_titles = set()
     citations = []
+    priority_cites = []  # Papers to cite from claim comparison (verified as more supported)
 
+    # 1. Collect paper_to_cite from claim_comparison (verified winner)
+    claim_path = os.path.join(OUTPUT_DIR, "claim_comparison_report.json")
+    if os.path.exists(claim_path):
+        try:
+            with open(claim_path, encoding="utf-8") as f:
+                cc = json.load(f)
+            p = cc.get("paper_to_cite")
+            if p and (p.get("title") or p.get("ieee_citation")):
+                priority_cites.append(p)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    # 2. From research_findings: paper_to_cite in validation.claim_comparison
     for path in [
         os.path.join(OUTPUT_DIR, "research_findings.json"),
         os.path.join(OUTPUT_DIR, "coverage_suggestions.json"),
@@ -32,6 +47,10 @@ def collect_ieee_citations() -> list[dict]:
 
         results = data.get("results", []) or data.get("suggestions", [])
         for r in results:
+            v = r.get("validation", {}) or {}
+            pc = v.get("claim_comparison", {}).get("paper_to_cite")
+            if pc and (pc.get("title") or pc.get("ieee_citation")):
+                priority_cites.append(pc)
             for p in r.get("papers_used", []):
                 title = (p.get("title") or "").strip()
                 ieee = (p.get("ieee_citation") or "").strip()
@@ -42,6 +61,20 @@ def collect_ieee_citations() -> list[dict]:
                     continue
                 seen_titles.add(key)
                 citations.append({
+                    "title": title,
+                    "ieee_citation": ieee or title,
+                    "source": p.get("source", ""),
+                })
+
+    # Prepend priority cites (verified as more supported)
+    for p in reversed(priority_cites):
+        title = (p.get("title") or "").strip()
+        ieee = (p.get("ieee_citation") or "").strip()
+        if title or ieee:
+            key = title.lower()[:80] if title else ieee[:80]
+            if key not in seen_titles:
+                seen_titles.add(key)
+                citations.insert(0, {
                     "title": title,
                     "ieee_citation": ieee or title,
                     "source": p.get("source", ""),

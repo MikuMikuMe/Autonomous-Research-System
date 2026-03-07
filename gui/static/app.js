@@ -1,5 +1,5 @@
 /**
- * QMIND GUI — WebSocket client, event handling, DOM updates.
+ * Bias Audit Pipeline GUI — WebSocket client, event handling, DOM updates.
  */
 
 const FIGURE_CONFIG = [

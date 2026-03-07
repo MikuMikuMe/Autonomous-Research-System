@@ -5,6 +5,16 @@
       "headers": {
         "Authorization": "Bearer YOUR_ALPHAXIV_TOKEN"
       }
+    },
+    "arxiv-mcp-server": {
+      "command": "uv",
+      "args": [
+        "tool",
+        "run",
+        "arxiv-mcp-server",
+        "--storage-path",
+        "outputs/arxiv_papers"
+      ]
     }
   }
 }

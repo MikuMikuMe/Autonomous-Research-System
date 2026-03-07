@@ -1,5 +1,5 @@
 """
-FastAPI server for QMIND GUI — WebSocket events, REST API, static files.
+FastAPI server for Bias Audit Pipeline GUI — WebSocket events, REST API, static files.
 """
 
 import asyncio
@@ -17,7 +17,7 @@ OUTPUTS_DIR = SCRIPT_DIR / "outputs"
 FIGURES_DIR = OUTPUTS_DIR / "figures"
 PAPER_DIR = OUTPUTS_DIR / "paper"
 
-app = FastAPI(title="QMIND Agentic System")
+app = FastAPI(title="Bias Audit Pipeline")
 
 # Static files
 STATIC_DIR = Path(__file__).resolve().parent / "static"

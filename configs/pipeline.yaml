@@ -1,4 +1,4 @@
-# Config composition for QMIND pipeline (agents, tools, envs, memory)
+# Config composition for Bias Audit Pipeline (agents, tools, envs, memory)
 # Phase 4: Config-driven orchestration
 
 pipeline:

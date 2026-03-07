@@ -1,4 +1,4 @@
-# QMIND Self-Evolution Roadmap
+# Bias Audit Pipeline — Self-Evolution Roadmap
 
 ## Honest Assessment: Current State vs. AI Court / DeepResearchAgent
 
@@ -12,7 +12,7 @@
 | **Code generation** | ✅ Coding Agent skill | ❌ N/A | ✅ Verification Agent generates Python |
 | **Never hardcode** | ✅ Skills as config | ✅ Prompts as resources | ✅ Prompts in config; Gemini-first; rule fallback |
 
-**Verdict:** QMIND is a **pipeline**, not a **self-evolving agentic system**. It has Judge + Revision (Observe → Optimize) but lacks:
+**Verdict:** The Bias Audit Pipeline is a **pipeline**, not a **self-evolving agentic system**. It has Judge + Revision (Observe → Optimize) but lacks:
 - Persistent memory (Remember)
 - Dynamic code generation for verification
 - Config-driven logic (prompts, rules, templates as resources)

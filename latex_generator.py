@@ -22,7 +22,7 @@ os.makedirs(PAPER_DIR, exist_ok=True)
 
 
 def _load_authors():
-    """Load authors from authors.txt. Format: 'Name - email@domain.com'. Kay Yan is lead (first)."""
+    """Load authors from authors.txt. Format: 'Name - email@domain.com'. Optional: 'Name -  | Affiliation' for custom affiliation."""
     authors = []
     if os.path.exists(AUTHORS_FILE):
         with open(AUTHORS_FILE, encoding="utf-8") as f:
@@ -31,21 +31,29 @@ def _load_authors():
                 if not line:
                     continue
                 if " - " in line:
-                    name, email = line.split(" - ", 1)
-                    authors.append({"name": name.strip(), "email": email.strip()})
+                    name, rest = line.split(" - ", 1)
+                    rest = rest.strip()
+                    if " | " in rest:
+                        email_part, affil = rest.split(" | ", 1)
+                        email, affil = email_part.strip(), affil.strip()
+                    else:
+                        email, affil = rest, None
+                    authors.append({"name": name.strip(), "email": email, "affiliation": affil or None})
     if not authors:
-        authors = [{"name": "QMind Research Team", "email": ""}]
+        authors = [{"name": "QMind Research Team", "email": "", "affiliation": None}]
     return authors
 
 
 def _latex_author_block(authors):
-    """Build IEEE author block from list of {name, email} dicts."""
+    """Build IEEE author block from list of {name, email, affiliation?} dicts."""
     blocks = []
+    default_affil = "School of Computing\\\\\nQueen's University\\\\\nKingston, Ontario, Canada"
     for i, a in enumerate(authors):
         name = a["name"].replace("&", r"\&")
-        email = a["email"].replace("&", r"\&")
-        affil = "School of Computing\\\\\nQueen's University\\\\\nKingston, Ontario, Canada"
-        if email:
+        email = a.get("email", "").replace("&", r"\&")
+        affil_override = a.get("affiliation")
+        affil = affil_override if affil_override else default_affil
+        if email and not affil_override:
             affil += f"\\\\\n\\texttt{{{email}}}"
         block = f"\\IEEEauthorblockN{{{name}}}\n\\IEEEauthorblockA{{{affil}}}"
         blocks.append(block)
@@ -101,6 +109,23 @@ def _fix_table_collisions(tex_content: str) -> str:
     return tex_content
 
 
+def _truncate_draft_at_sentence_boundary(text: str, max_chars: int) -> str:
+    """
+    Truncate draft at sentence boundary to prevent mid-sentence cuts.
+    CRITICAL: Prevents white chunks and incomplete content in the paper.
+    """
+    if len(text) <= max_chars:
+        return text
+    cut = text[:max_chars]
+    last_period = cut.rfind(". ")
+    last_excl = cut.rfind("! ")
+    last_quest = cut.rfind("? ")
+    last_end = max(last_period, last_excl, last_quest)
+    if last_end > max_chars * 0.6:
+        return text[: last_end + 1].strip()
+    return cut.strip()
+
+
 def _generate_paper_tex_from_gemini(baseline_data, mitigation_data):
     """Use Gemini to convert paper_draft.md to full IEEE LaTeX. Returns True if successful."""
     draft_path = os.path.join(OUTPUT_DIR, "paper_draft.md")
@@ -138,6 +163,10 @@ def _generate_paper_tex_from_gemini(baseline_data, mitigation_data):
     authors = _load_authors()
     author_block = _latex_author_block(authors)
 
+    print("      Calling Gemini for LaTeX conversion (typically 1–2 min)...", flush=True)
+    # Truncate at sentence boundary to prevent incomplete content (max 60k for Gemini 2.0)
+    draft_safe = _truncate_draft_at_sentence_boundary(draft_content, 60000)
+
     system = """You are a LaTeX expert. Convert the given Markdown research paper to IEEE conference format.
 CRITICAL RULES:
 1. Use \\documentclass[conference]{IEEEtran}
@@ -148,13 +177,14 @@ CRITICAL RULES:
 6. Preserve all section structure, equations (use \\begin{equation}), and content
 7. PRESERVE original wording from "From our reference documents" blockquotes — these come from bias_mitigation.pdf, Bias Auditing Framework.pdf, Bias Detection findings.pdf; keep them as \\begin{quote} or \\textit{...} with the exact wording
 8. Escape special chars: & → \\&, _ → \\_, % → \\%
-9. Output ONLY valid LaTeX, no markdown or explanation"""
+9. Output ONLY valid LaTeX, no markdown or explanation
+10. COMPLETENESS GUARDRAIL: NEVER output incomplete sentences. Every paragraph and quote MUST end with proper punctuation (. ! ?). If source text is truncated mid-sentence, either complete the thought coherently or omit that fragment. No trailing "particularly", "by 0.015", "the key", "far exceeding EU" etc. — these cause white chunks in the PDF."""
 
     prompt = f"""Convert this Markdown paper to a complete IEEE conference LaTeX document.
 
 MARKDOWN CONTENT:
 ---
-{draft_content[:35000]}
+{draft_safe}
 ---
 
 REPLACE any markdown tables in these sections with these EXACT LaTeX blocks:
@@ -178,6 +208,7 @@ REQUIREMENTS:
     result = generate(prompt, system_instruction=system, max_output_tokens=16384)
     if not result:
         return False
+    print("      Gemini response received, writing paper.tex...", flush=True)
 
     # Strip markdown code block if present
     if "```" in result:
@@ -239,12 +270,17 @@ def generate_paper_tex(baseline_data, mitigation_data):
     Order: (1) Gemini (full IEEE from paper_draft), (2) pandoc (with table fix), (3) template."""
 
     # 1. Prefer Gemini for full research paper in correct IEEE format (no table collision)
+    print("      Trying Gemini (Markdown → IEEE LaTeX)...", flush=True)
     if _generate_paper_tex_from_gemini(baseline_data, mitigation_data):
+        print("      Gemini succeeded.", flush=True)
         return os.path.join(PAPER_DIR, "paper.tex")
+    print("      Gemini unavailable or failed, trying pandoc...", flush=True)
 
     # 2. Pandoc with table* fix
     if _generate_paper_tex_from_markdown(baseline_data, mitigation_data):
+        print("      Pandoc succeeded.", flush=True)
         return os.path.join(PAPER_DIR, "paper.tex")
+    print("      Pandoc unavailable, using template...", flush=True)
 
     def has_fig(path):
         return os.path.exists(os.path.join(FIGURES_DIR, path))
@@ -505,7 +541,8 @@ def compile_latex():
         )
 
     try:
-        for _ in range(2):
+        for i in range(2):
+            print(f"      pdflatex pass {i+1}/2...", flush=True)
             r = subprocess.run(
                 [pdflatex, "-interaction=nonstopmode", "paper.tex"],
                 cwd=cwd,
@@ -523,14 +560,19 @@ def compile_latex():
             if os.path.isfile(bibtex_exe):
                 bibtex = bibtex_exe
         if bibtex and os.path.exists(os.path.join(cwd, "references.bib")):
+            print("      bibtex...", flush=True)
             subprocess.run([bibtex, "paper"], cwd=cwd, capture_output=True, timeout=30)
+            print("      pdflatex pass 3 (after bibtex)...", flush=True)
             subprocess.run(
                 [pdflatex, "-interaction=nonstopmode", "paper.tex"],
                 cwd=cwd,
                 capture_output=True,
                 timeout=60,
             )
+        else:
+            print("      (no references.bib, skipping bibtex)", flush=True)
 
+        print("      pdflatex final pass...", flush=True)
         subprocess.run(
             [pdflatex, "-interaction=nonstopmode", "paper.tex"],
             cwd=cwd,

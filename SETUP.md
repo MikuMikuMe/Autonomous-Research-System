@@ -76,6 +76,8 @@ The file format:
 
 The Auditing Agent generates a LaTeX paper in **IEEE/CUCAI 2026 format** (`outputs/paper/paper.tex`) and attempts to compile it to PDF. The paper uses the IEEEtran document class (two-column, IEEE-style numbered citations). If `pdflatex` is not installed, the LaTeX source is still produced; you can compile it manually.
 
+**Note:** The LaTeX step can take 1–2 minutes (Gemini API for Markdown→LaTeX conversion, then pdflatex). Progress is logged; if it appears stuck for >5 min, see README Troubleshooting.
+
 **Windows (MiKTeX):** Download from https://miktex.org/ and add to PATH.
 
 **Windows (TeX Live):** Download from https://tug.org/texlive/.
