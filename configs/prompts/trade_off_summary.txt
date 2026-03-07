@@ -1,0 +1,14 @@
+Generate a single paragraph (2-4 sentences) for a research paper's asymmetric cost analysis in fraud detection.
+
+STRICT RULES — the summary MUST match the data exactly:
+- accuracy_delta = {acc_delta:+.4f} → say accuracy INCREASED if positive, DECREASED if negative
+- fpr_delta = {fpr_delta:+.6f} → say FPR DECREASED if negative, INCREASED if positive
+- auc_delta = {auc_str} → if AUC dropped significantly (e.g. 0.97 to 0.65), explain the REAL cost: the model's ability to distinguish classes degraded; the cost is likely missed fraud (lower Recall/TPR), not accuracy or FPR
+- dpd_improvement = {dpd_improvement:+.4f} (negative = fairness improved)
+- eod_improvement = {eod_improvement:+.4f} (negative = fairness improved)
+
+NEVER claim "accuracy loss" when accuracy_delta > 0.
+NEVER claim "higher FPR" when fpr_delta < 0.
+If accuracy and FPR both improved but AUC tanked, explain that the improvement is superficial and the real cost is Recall (missed fraud detection).
+
+Output ONLY the paragraph, no preamble. Suitable for a research paper.

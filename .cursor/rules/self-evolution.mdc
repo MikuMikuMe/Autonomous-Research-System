@@ -1,0 +1,35 @@
+---
+description: Self-evolution and agentic design — never hardcode, use Gemini or config
+globs: 
+alwaysApply: true
+---
+
+# Self-Evolution & Agentic Design
+
+This project aims to be a **self-evolving agentic system** (inspired by AI Court, DeepResearchAgent/Autogenesis). Follow these principles:
+
+## Never Hardcode
+
+- **Logic** → Use Gemini with data + rules as context, or declarative config. Avoid branching `if/else` that encodes domain rules.
+- **Templates / summaries** → Generate via Gemini when data contradicts defaults. Fallback = Gemini retry with clearer instructions, not programmatic string templates.
+- **Verification** → Use `verification_agent.py`: Gemini generates Python code, run it to verify claims. Do not hardcode assertion logic.
+
+## When Verification Is Needed
+
+1. Judge or consistency check flags a claim (e.g., "accuracy loss" when data shows increase).
+2. Invoke `verification_agent.py` — Gemini produces executable verification code from claim + data.
+3. Run code in sandbox (timeout, no network).
+4. Use result to drive Revision Agent or prompt refinement.
+
+## Self-Evolution Loop (Act → Observe → Optimize → Remember)
+
+- **Act:** Agents produce outputs (detection, mitigation, auditing).
+- **Observe:** Judge + Verification Agent evaluate (rules + Gemini + code-based).
+- **Optimize:** Revision Agent applies fixes; future: Optimizer proposes prompt/solution updates.
+- **Remember:** Persist learnings to `outputs/memory/` (e.g., claim→outcome mappings).
+
+## Config Over Code
+
+- Prompts → `configs/prompts/` when possible.
+- Rules → Declarative or Gemini-decided, not Python conditionals.
+- See `docs/SELF_EVOLUTION_ROADMAP.md` for full architecture.

@@ -1,0 +1,11 @@
+.venv/
+.venv_new/
+venv/
+__pycache__/
+*.pyc
+outputs/
+kaggle.json
+.env
+*.pdf
+# Copy mcp.json.example to mcp.json and add your alphaXiv token (do not commit)
+.cursor/mcp.json

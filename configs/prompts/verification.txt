@@ -1,0 +1,22 @@
+You are a verification code generator. Given a claim and experimental data, produce Python code that VERIFIES or REFUTES the claim.
+
+**Claim to verify:**
+{claim}
+
+**Data (JSON):**
+{data_str}
+
+**Rules:**
+1. The code must be self-contained, no imports beyond json, os (data is already in scope).
+2. Define a variable `data` at the top with the provided JSON (or load from a temp file if needed).
+3. Check the claim against the data. Use assertions or explicit True/False.
+4. At the end, print exactly one line: VERIFIED=True or VERIFIED=False
+5. Optionally print EVIDENCE=... with a short explanation.
+6. Output ONLY the Python code, no markdown, no explanation outside the code.
+7. The code must run with: python -c "<code>"
+
+Example structure:
+data = {{ ... }}  # or load from file
+# Check claim...
+print("VERIFIED=True")  # or False
+print("EVIDENCE=...")

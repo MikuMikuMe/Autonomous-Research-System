@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "description": "RSPL — Resource Substrate Protocol Layer: versioned agents, tools, prompts",
+  "agents": [
+    {"id": "detection", "module": "detection_agent", "version": "1.0", "lifecycle": "run"},
+    {"id": "mitigation", "module": "mitigation_agent", "version": "1.0", "lifecycle": "run"},
+    {"id": "auditing", "module": "auditing_agent", "version": "1.0", "lifecycle": "run"},
+    {"id": "judge", "module": "judge_agent", "version": "1.0", "lifecycle": "evaluate"},
+    {"id": "revision", "module": "revision_agent", "version": "1.0", "lifecycle": "optimize"},
+    {"id": "verification", "module": "verification_agent", "version": "1.0", "lifecycle": "verify"},
+    {"id": "optimizer", "module": "optimizer_agent", "version": "1.0", "lifecycle": "optimize"}
+  ],
+  "tools": [
+    {"id": "config_loader", "module": "config_loader", "version": "1.0", "type": "load_prompt|load_rules"},
+    {"id": "memory", "module": "memory_agent", "version": "1.0", "type": "persist|load"}
+  ],
+  "prompts": [
+    {"id": "trade_off_summary", "path": "prompts/trade_off_summary.txt", "version": "1.0"},
+    {"id": "mitigation_claims", "path": "prompts/mitigation_claims.txt", "version": "1.0"},
+    {"id": "revision", "path": "prompts/revision.txt", "version": "1.0"},
+    {"id": "verification", "path": "prompts/verification.txt", "version": "1.0"}
+  ],
+  "environments": [
+    {"id": "outputs", "path": "outputs", "type": "filesystem"},
+    {"id": "memory", "path": "outputs/memory", "type": "memory_store"}
+  ]
+}

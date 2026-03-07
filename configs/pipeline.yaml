@@ -1,0 +1,33 @@
+# Config composition for QMIND pipeline (agents, tools, envs, memory)
+# Phase 4: Config-driven orchestration
+
+pipeline:
+  name: qmind-research
+  version: "1.0"
+
+  core_agents:
+    - detection
+    - mitigation
+    - auditing
+
+  research_agents:
+    - research_agent
+    - gap_check_agent
+    - coverage_agent
+    - topic_coverage_agent
+    - reproducibility_agent
+    - verification_agent
+    - optimizer_agent
+
+  judge:
+    agent: judge
+    retry_hint_map:
+      revise_claims: revision
+
+  memory:
+    persist_session: true
+    persist_events_on_failure: true
+
+  optimizer:
+    run_after_research: true
+    apply_proposals: false  # set true for auto-apply, or use --apply

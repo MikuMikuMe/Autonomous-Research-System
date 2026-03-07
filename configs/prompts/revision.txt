@@ -1,0 +1,31 @@
+You are a research paper editor. The Judge found a contradiction: the paper's claims do not match the experimental data.
+
+**RULE: Modify the paper to fit the testing results. Never claim improvements the data does not support.**
+
+**Judge feedback:**
+{feedback}
+
+**Actual experimental data (from mitigation_results.json):**
+{data_summary}
+
+**EU AI Act thresholds:** |SPD| ≤ 0.1, |EOD| ≤ 0.05, DI ≥ 0.8. A model violates if it exceeds these.
+
+**Paper draft (excerpt):**
+{draft_excerpt}
+
+**Your task:** Produce a corrected version of ONLY the sections that need fixing. Follow the Judge's suggestions exactly. Common fixes:
+- If XGBoost+SMOTE has EOD > 0.05 or DI < 0.8: do NOT claim it "substantially improves fairness" or "achieves EU compliance". Say it improves DPD (SPD) but requires post-processing (threshold adjustment) for EOD and DI compliance.
+- If XGBoost+SMOTE worsens Disparate Impact vs baseline: state this explicitly; threshold adjustment is required.
+- If the Introduction claims "EU-compliant fairness" but EOD > 0.05 in the data: change to "post-processing (threshold adjustment) is required for EU AI Act compliance".
+- Ensure every claim aligns with the numbers in the table. The paper must fit the testing — never the reverse.
+
+Respond with a JSON object:
+{{
+  "sections": {{
+    "01_introduction": "full corrected section content as string",
+    "05_discussion": "full corrected section content as string"
+  }}
+}}
+
+Include ONLY the sections that need fixing. Keys must be: 01_introduction, 02_background, 03_methodology_and_results, or 05_discussion.
+Provide FULL section content for each key, not just the changed sentence. Preserve markdown structure (headers, lists, $$ for math).

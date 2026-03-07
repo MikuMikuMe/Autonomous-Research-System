@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QMIND Agentic System</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+</head>
+<body class="bg-slate-900 text-slate-200 min-h-screen">
+  <div class="container mx-auto px-4 py-6 max-w-7xl">
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
+      <h1 class="text-2xl font-bold text-cyan-400">QMIND Agentic System</h1>
+      <div class="flex items-center gap-4">
+        <span id="status-badge" class="px-3 py-1 rounded-full text-sm font-medium bg-slate-700 text-slate-300">Idle</span>
+        <button id="run-btn" class="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition">
+          Run Pipeline
+        </button>
+      </div>
+    </header>
+
+    <!-- Pipeline progress -->
+    <div class="flex gap-2 mb-6">
+      <div id="step-detection" class="flex-1 px-4 py-2 rounded-lg bg-slate-700 text-slate-400 text-center text-sm">
+        Detection
+      </div>
+      <div id="step-mitigation" class="flex-1 px-4 py-2 rounded-lg bg-slate-700 text-slate-400 text-center text-sm">
+        Mitigation
+      </div>
+      <div id="step-auditing" class="flex-1 px-4 py-2 rounded-lg bg-slate-700 text-slate-400 text-center text-sm">
+        Auditing
+      </div>
+    </div>
+    <p id="attempt-info" class="text-slate-500 text-sm mb-2"></p>
+    <!-- Agent progress bar (shown when agent emits progress) -->
+    <div id="agent-progress-container" class="mb-4 hidden">
+      <div class="flex justify-between text-xs text-slate-400 mb-1">
+        <span id="agent-progress-label">Loading...</span>
+        <span id="agent-progress-pct">0%</span>
+      </div>
+      <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+        <div id="agent-progress-bar" class="h-full bg-cyan-500 transition-all duration-300" style="width: 0%"></div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-2 border-b border-slate-700 mb-4">
+      <button data-tab="log" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-800 text-cyan-400 font-medium">
+        Live Log
+      </button>
+      <button data-tab="metrics" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
+        Metrics
+      </button>
+      <button data-tab="figures" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
+        Figures
+      </button>
+      <button data-tab="paper" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
+        Paper
+      </button>
+      <button data-tab="judge" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
+        Judge
+      </button>
+    </div>
+
+    <!-- Tab content -->
+    <div id="tab-log" class="tab-content">
+      <pre id="live-log" class="bg-slate-950 p-4 rounded-lg overflow-auto font-mono text-sm h-96"></pre>
+    </div>
+
+    <div id="tab-metrics" class="tab-content hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <h3 class="text-lg font-semibold mb-2 text-cyan-400">Baseline</h3>
+          <div id="baseline-table" class="overflow-x-auto rounded-lg border border-slate-700"></div>
+        </div>
+        <div>
+          <h3 class="text-lg font-semibold mb-2 text-cyan-400">Mitigation</h3>
+          <div id="mitigation-table" class="overflow-x-auto rounded-lg border border-slate-700"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-figures" class="tab-content hidden">
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="rounded-lg border border-slate-700 overflow-hidden">
+          <img id="fig-baseline-fairness" class="w-full h-48 object-contain bg-slate-800" src="" alt="Baseline Fairness" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+          <div class="fig-placeholder h-48 flex items-center justify-center bg-slate-800 text-slate-500 text-sm" style="display:none;">Not yet generated</div>
+          <p class="p-2 text-sm text-slate-400">Baseline Fairness</p>
+        </div>
+        <div class="rounded-lg border border-slate-700 overflow-hidden">
+          <img id="fig-baseline-roc" class="w-full h-48 object-contain bg-slate-800" src="" alt="Baseline ROC" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+          <div class="fig-placeholder h-48 flex items-center justify-center bg-slate-800 text-slate-500 text-sm" style="display:none;">Not yet generated</div>
+          <p class="p-2 text-sm text-slate-400">Baseline ROC</p>
+        </div>
+        <div class="rounded-lg border border-slate-700 overflow-hidden">
+          <img id="fig-mitigation-comparison" class="w-full h-48 object-contain bg-slate-800" src="" alt="Mitigation Comparison" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+          <div class="fig-placeholder h-48 flex items-center justify-center bg-slate-800 text-slate-500 text-sm" style="display:none;">Not yet generated</div>
+          <p class="p-2 text-sm text-slate-400">Mitigation Comparison</p>
+        </div>
+      </div>
+    </div>
+
+    <div id="tab-paper" class="tab-content hidden">
+      <div id="paper-actions" class="mb-4 flex gap-2">
+        <a id="open-paper-btn" href="#" target="_blank" class="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm hidden">
+          Open Research Paper (PDF)
+        </a>
+      </div>
+      <div id="paper-content" class="bg-slate-950 p-6 rounded-lg prose prose-invert max-w-none min-h-96"></div>
+    </div>
+
+    <div id="tab-judge" class="tab-content hidden">
+      <div id="judge-feedback" class="space-y-4"></div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

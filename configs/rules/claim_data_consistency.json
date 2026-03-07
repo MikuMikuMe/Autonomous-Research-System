@@ -1,0 +1,36 @@
+{
+  "name": "claim_data_consistency",
+  "version": "1.0",
+  "description": "Rules for ensuring paper claims match experimental data",
+  "rules": [
+    {
+      "id": "accuracy_delta",
+      "condition": "accuracy_delta > 0",
+      "forbidden_phrases": ["accuracy loss", "accuracy decreased", "accuracy dropped"],
+      "required_framing": "accuracy increased or improved"
+    },
+    {
+      "id": "fpr_delta",
+      "condition": "fpr_delta < 0",
+      "forbidden_phrases": ["higher FPR", "increased FPR", "more false positives"],
+      "required_framing": "FPR decreased or reduced"
+    },
+    {
+      "id": "auc_drop",
+      "condition": "auc_delta < -0.1",
+      "required_framing": "mention real cost is Recall/TPR (missed fraud), not accuracy or FPR"
+    },
+    {
+      "id": "eod_compliance",
+      "condition": "|EOD| > 0.05",
+      "forbidden_phrases": ["EU-compliant", "achieves EOD compliance", "|EOD| ≤ 0.05"],
+      "required_framing": "post-processing required for EOD compliance"
+    },
+    {
+      "id": "di_compliance",
+      "condition": "DI < 0.8",
+      "forbidden_phrases": ["DI compliant", "meets disparate impact"],
+      "required_framing": "threshold adjustment required for DI"
+    }
+  ]
+}
