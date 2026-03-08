@@ -10,12 +10,12 @@ description: Run the unified agentic pipeline for bias detection, mitigation, an
 From project root with venv activated:
 
 ```bash
-python orchestrator.py
+python main.py
 ```
 
 Or with venv explicitly:
 ```bash
-.venv/Scripts/python.exe orchestrator.py
+.venv/Scripts/python.exe main.py
 ```
 
 ## What It Does
@@ -44,12 +44,11 @@ If any core agent fails the judge, the orchestrator retries (up to 3 times) with
 ## Run Individual Agents
 
 ```bash
-python detection_agent.py [seed]   # default seed=42
-python mitigation_agent.py [seed]
-python auditing_agent.py
-python judge_agent.py [detection|mitigation|auditing]
-python structure_review.py        # Structure review (structure + citation research)
-python format_check_agent.py       # Validate paper/JSON format; use --fix to auto-correct
+python -m agents.detection_agent [seed]   # default seed=42
+python -m agents.mitigation_agent [seed]
+python -m agents.auditing_agent
+python -m agents.judge_agent [detection|mitigation|auditing]
+python -m agents.format_check_agent       # Validate paper/JSON format; use --fix to auto-correct
 ```
 
 ## Research Phase (integrated)
@@ -61,17 +60,17 @@ The research phase runs automatically after the paper is ready:
 - **Reproducibility Agent** — Multiple seeds to verify claims
 - **Verification Agent** — Gemini generates Python code, runs it to verify claims (never hardcode). Requires `GOOGLE_API_KEY`.
 
-To run research agents standalone: `python research_orchestrator.py`
+To run research agents standalone: `python -m orchestration.research_orchestrator`
 
 ## Self-Evolution (Act → Observe → Optimize → Remember)
 
 - **Observe:** Judge + Verification Agent (code-based checks)
 - **Optimize:** Revision Agent applies fixes; Optimizer Agent proposes prompt updates from memory
-- **Remember:** `memory_agent.py` persists sessions/events to `outputs/memory/`
+- **Remember:** `agents/memory_agent.py` persists sessions/events to `outputs/memory/`
 - **Config:** `configs/prompts/` — trade_off_summary, mitigation_claims (never hardcode)
 - **Rule:** `.cursor/rules/self-evolution.mdc`
 
-Run optimizer standalone: `python -m optimizer_agent`
+Run optimizer standalone: `python -m agents.optimizer_agent`
 
 ## Gemini-Powered Evaluation (Optional)
 

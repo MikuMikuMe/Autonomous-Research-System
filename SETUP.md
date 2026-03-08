@@ -4,7 +4,7 @@
 
 With venv activated:
 ```bash
-python orchestrator.py
+python main.py
 ```
 
 Runs Detection → Mitigation → Auditing automatically. The **Judge Agent** evaluates each output; failed agents are retried (up to 3 times) with different seeds. See [.cursor/skills/qmind-agentic-system/SKILL.md](.cursor/skills/qmind-agentic-system/SKILL.md) for details.
@@ -120,7 +120,7 @@ Without the API key, agents fall back to rule-based evaluation only.
 
 ## alphaXiv (Optional — for Research Pipeline)
 
-The **research pipeline** (`research_orchestrator.py`) uses alphaXiv to find papers supporting claims and fill gaps. Requires the same token you use in Cursor's MCP config.
+The **research pipeline** (`orchestration/research_orchestrator.py`) uses alphaXiv to find papers supporting claims and fill gaps. Requires the same token you use in Cursor's MCP config.
 
 **Setup:**
 1. Get a token from [alphaxiv.org](https://alphaxiv.org/signin).
@@ -130,7 +130,7 @@ The **research pipeline** (`research_orchestrator.py`) uses alphaXiv to find pap
    ```
 3. Run the full pipeline (research phase runs automatically after the paper):
    ```bash
-   python orchestrator.py
+   python main.py
    ```
 
 See [docs/ALPHAXIV_SETUP.md](docs/ALPHAXIV_SETUP.md) for details.
@@ -152,7 +152,7 @@ python orchestrator.py
 
 Or run directly without activating:
 ```powershell
-.\.venv_new\Scripts\python.exe orchestrator.py
+.\.venv_new\Scripts\python.exe main.py
 ```
 
 **Fix 2 — Free the lock, then recreate:**

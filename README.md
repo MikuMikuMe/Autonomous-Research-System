@@ -71,7 +71,7 @@ After each agent runs, the **Judge** evaluates its output. If the Judge fails an
                     └───────────────────────────┘
 ```
 
-**Execution model:** Agents run as subprocesses (`python -m detection_agent 42`). The orchestrator does not modify agent code; it controls invocation order, seed, and retry count.
+**Execution model:** Agents run as subprocesses (`python -m agents.detection_agent 42`). The orchestrator does not modify agent code; it controls invocation order, seed, and retry count.
 
 ---
 
@@ -79,121 +79,143 @@ After each agent runs, the **Judge** evaluates its output. If the Judge fails an
 
 ```
 QMIND-Agent/
-├── orchestrator.py          # Main entry: runs pipeline + Judge loop (CLI)
-├── run_gui.py               # GUI entry: web dashboard
-├── judge_agent.py            # Quality evaluation (rule-based + Gemini)
-├── detection_agent.py        # Bias detection
-├── mitigation_agent.py       # Bias mitigation
-├── auditing_agent.py         # Paper generation
-├── llm_client.py             # Gemini API client (Judge)
-├── latex_generator.py        # LaTeX paper with figures, formulas, bibliography
-├── structure_review.py           # Structure review, citation research
+├── main.py                   # CLI entry point (runs full pipeline)
+├── run_gui.py                # GUI entry point (web dashboard)
+│
+├── agents/                   # All agent modules
+│   ├── detection_agent.py    # Bias detection (baseline models, fairness metrics)
+│   ├── mitigation_agent.py   # Bias mitigation (SMOTE, threshold adjustment)
+│   ├── auditing_agent.py     # Paper generation (sections, LaTeX, PDF)
+│   ├── judge_agent.py        # Quality evaluation (rule-based + Gemini)
+│   ├── revision_agent.py     # Applies Judge feedback to paper
+│   ├── verification_agent.py # Code-based claim verification
+│   ├── research_agent.py     # alphaXiv/arXiv research for claims
+│   ├── gap_check_agent.py    # Paper vs reference PDF coverage
+│   ├── coverage_agent.py     # Finds papers for gaps
+│   ├── topic_coverage_agent.py
+│   ├── reproducibility_agent.py
+│   ├── claim_comparison_agent.py
+│   ├── format_check_agent.py
+│   ├── optimizer_agent.py    # Prompt refinement from memory
+│   └── memory_agent.py       # Session persistence
+│
+├── utils/                    # Shared utilities
+│   ├── llm_client.py         # Gemini API wrapper
+│   ├── config_loader.py      # Loads prompts/rules from configs/
+│   ├── latex_generator.py    # LaTeX paper (IEEE/CUCAI 2026 format)
+│   ├── claims_utils.py       # Data-driven claim inference
+│   ├── pdf_source_extractor.py
+│   ├── citations_helper.py
+│   ├── citation_enrichment.py
+│   ├── paper_quality_guardrail.py
+│   ├── structure_review.py   # Structure review, citation research
+│   ├── resource_registry.py
+│   ├── research_client.py
+│   └── research_result_processor.py
+│
+├── orchestration/            # Pipeline orchestration
+│   ├── orchestrator.py       # Main pipeline + Judge loop + retries
+│   ├── research_orchestrator.py
+│   └── sep_layer.py          # Self-evolution protocol
+│
 ├── gui/                      # Web dashboard
 │   ├── server.py             # FastAPI + WebSocket
 │   ├── streaming_orchestrator.py
 │   └── static/               # index.html, app.js
+│
+├── configs/                  # Declarative configuration
+│   ├── pipeline.yaml         # Pipeline agent order, judge, memory
+│   ├── prompts/              # Gemini prompt templates
+│   └── rules/                # Consistency rules (JSON)
+│
+├── data/                     # Reference PDFs
+│   ├── bias_mitigation.pdf
+│   ├── Bias Auditing Framework.pdf
+│   ├── Bias Detection findings.pdf
+│   └── how_biases_are_introduced.pdf
+│
+├── docs/                     # Documentation
+│   ├── ALPHAXIV_SETUP.md
+│   ├── RESEARCH_CHECKLIST.md
+│   └── SELF_EVOLUTION_ROADMAP.md
+│
+├── outputs/                  # Generated artifacts (created at runtime)
+│   ├── paper/                # paper.tex, paper.pdf, references.bib
+│   ├── paper_sections/       # Individual LaTeX sections
+│   ├── figures/              # Publication-ready figures
+│   ├── memory/               # Session memory (self-evolution)
+│   ├── baseline_results.json
+│   ├── mitigation_results.json
+│   └── structure_review.json
+│
 ├── requirements.txt
-├── README.md                 # This document
-├── SETUP.md                  # Setup (venv, Kaggle, LaTeX, Gemini)
-├── howto.md                  # Research workflow guide
-├── kaggle.json.example       # Kaggle credential template
-├── env.example               # Gemini API key template
-├── docs/
-│   ├── ALPHAXIV_SETUP.md     # alphaXiv MCP integration
-│   └── RESEARCH_CHECKLIST.md # Coverage checklist from research outlines
-├── .cursor/
-│   ├── mcp.json              # alphaXiv MCP config (add token)
-│   └── skills/
-│       └── qmind-agentic-system/
-│           └── SKILL.md      # Cursor skill for pipeline
-├── .venv/                    # Python virtual environment
-└── outputs/                  # Generated artifacts (created at runtime)
-    ├── data_splits.npz
-    ├── baseline_results.json
-    ├── mitigation_results.json
-    ├── mitigation_comparison.png
-    ├── figures/
-    │   ├── fig_baseline_fairness.{png,pdf}
-    │   ├── fig_baseline_roc.{png,pdf}
-    │   └── fig_mitigation_comparison.{png,pdf}
-    ├── paper_draft.md
-    ├── paper_sections/
-    │   ├── 01_introduction.md
-    │   ├── 02_background.md
-    │   ├── 03_methodology_and_results.md
-    │   ├── 04_audit_framework.md
-    │   ├── 05_discussion.md
-    │   └── 06_references.md
-    ├── paper/
-    │   ├── paper.tex
-    │   ├── paper.pdf          # If pdflatex installed
-    │   └── references.bib
-    └── structure_review.json
+├── README.md
+├── SETUP.md
+├── howto.md
+├── authors.txt
+├── env.example
+└── kaggle.json.example
 ```
 
 ---
 
 ## Components
 
-### Orchestrator (`orchestrator.py`)
+### Orchestrator (`orchestration/orchestrator.py`)
 
 - **Role:** Central controller. Runs agents in order, calls Judge, handles retries.
 - **Constants:** `MAX_RETRIES = 3`, `AGENTS = ["detection", "mitigation", "auditing"]`
 - **Key functions:**
-  - `run_agent(agent_name, seed)` — subprocess `python -m <module> <seed>`
-  - `run_judge(agent_name)` — imports and calls `judge_agent.evaluate(agent_name)`
+  - `run_agent(agent_name, seed)` — subprocess `python -m agents.<module> <seed>`
+  - `run_judge(agent_name)` — imports and calls `agents.judge_agent.evaluate(agent_name)`
 - **Exit:** `sys.exit(1)` if any agent fails after all retries.
 
-### Judge Agent (`judge_agent.py`)
+### Judge Agent (`agents/judge_agent.py`)
 
 - **Role:** Evaluate agent outputs. Return `{passed, feedback[], retry_hint}`.
 - **Modes:**
   - **Rule-based (always):** File existence, schema, section names, table presence.
   - **Gemini (when `GOOGLE_API_KEY` set):** Semantic evaluation of quality, consistency, claim support.
 - **API:** `evaluate(agent_name)`, `evaluate_all()`
-- **CLI:** `python judge_agent.py [detection|mitigation|auditing]`
+- **CLI:** `python -m agents.judge_agent [detection|mitigation|auditing]`
 
-### Detection Agent (`detection_agent.py`)
+### Detection Agent (`agents/detection_agent.py`)
 
 - **Role:** Download Credit Card Fraud dataset, inject synthetic protected attribute, train baseline models, compute fairness metrics.
-- **Hours:** 1 (setup), 2 (baseline proof), 4 (export figures)
 - **Input:** Kaggle dataset `mlg-ulb/creditcardfraud` (via kagglehub)
 - **Output:** `data_splits.npz`, `baseline_results.json`, `figures/fig_baseline_*.{png,pdf}`
-- **CLI:** `python detection_agent.py [seed]`
+- **CLI:** `python -m agents.detection_agent [seed]`
 
-### Mitigation Agent (`mitigation_agent.py`)
+### Mitigation Agent (`agents/mitigation_agent.py`)
 
 - **Role:** Load Detection outputs, apply SMOTE, train XGBoost, apply threshold adjustment, produce comparative matrix and asymmetric cost analysis.
-- **Phases:** Setup, load baseline, mitigation, export figures
 - **Input:** `data_splits.npz`, `baseline_results.json`
 - **Output:** `mitigation_results.json`, `mitigation_comparison.png`, `figures/fig_mitigation_comparison.{png,pdf}`
-- **CLI:** `python mitigation_agent.py [seed]`
+- **CLI:** `python -m agents.mitigation_agent [seed]`
 
-### Auditing Agent (`auditing_agent.py`)
+### Auditing Agent (`agents/auditing_agent.py`)
 
 - **Role:** Generate paper sections from templates + Detection/Mitigation JSON, compile draft, generate LaTeX, run structure review.
-- **Phases:** Intro/Background, Methodology, LaTeX, Discussion, structure review
 - **Input:** `baseline_results.json`, `mitigation_results.json`
-- **Output:** `paper_sections/*.md`, `paper_draft.md`, `paper/paper.tex`, `paper/paper.pdf`, `structure_review.json`
-- **CLI:** `python auditing_agent.py`
+- **Output:** `paper_sections/*.tex`, `paper/paper.tex`, `paper/paper.pdf`, `structure_review.json`
+- **CLI:** `python -m agents.auditing_agent`
 
-### LLM Client (`llm_client.py`)
+### LLM Client (`utils/llm_client.py`)
 
 - **Role:** Gemini API wrapper for Judge and Auditing agents.
 - **Config:** `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `GEMINI_MODEL` (default: `gemini-3.1-pro-preview`)
 - **Features:** `generate()`, `generate_with_grounding()` (Google Search), `generate_json()`
 - **Optional:** Loads `.env` via `python-dotenv` if installed.
 
-### LaTeX Generator (`latex_generator.py`)
+### LaTeX Generator (`utils/latex_generator.py`)
 
 - **Role:** Generate publication-ready LaTeX paper in **IEEE/CUCAI 2026 format** (IEEEtran, two-column, IEEE-style citations) with figures, formulas (SPD, DI, EOD, Accuracy, F1), tables, bibliography.
 - **Output:** `outputs/paper/paper.tex`, `outputs/paper/paper.pdf` (if pdflatex installed)
 
-### Structure Review (`structure_review.py`)
+### Structure Review (`utils/structure_review.py`)
 
 - **Role:** Review paper structure, verify formulas, run citation research via Gemini + Google Search grounding.
 - **Output:** `outputs/structure_review.json`
-- **CLI:** `python structure_review.py` (structure review)
 
 ---
 
@@ -320,16 +342,16 @@ When configured, Cursor's AI can search papers via [alphaXiv](https://alphaxiv.o
 
 | Location | Variable | Default | Purpose |
 |----------|----------|---------|---------|
-| `orchestrator.py` | `MAX_RETRIES` | 3 | Max attempts per agent |
-| `orchestrator.py` | `AGENTS` | `["detection","mitigation","auditing"]` | Core pipeline order |
-| `orchestrator.py` | `RESEARCH_AGENTS` | research, gap_check, coverage, reproducibility | Runs after paper ready |
-| `judge_agent.py` | `MIN_DETECTION_MODELS` | 2 | Required baseline count |
-| `judge_agent.py` | `MIN_MITIGATION_STRATEGIES` | 2 | Required mitigation count |
-| `judge_agent.py` | `MIN_PAPER_LENGTH` | 2000 | Min draft chars |
-| `judge_agent.py` | `REQUIRED_PAPER_SECTIONS` | [...] | Section names |
-| `llm_client.py` | `GEMINI_MODEL` | `gemini-3.1-pro-preview` | Gemini model |
-| `llm_client.py` | `GOOGLE_API_KEY` | env | API key |
-| All agents | `OUTPUT_DIR` | `outputs/` | Output directory |
+| `orchestration/orchestrator.py` | `MAX_RETRIES` | 3 | Max attempts per agent |
+| `orchestration/orchestrator.py` | `AGENTS` | `["detection","mitigation","auditing"]` | Core pipeline order |
+| `orchestration/orchestrator.py` | `RESEARCH_AGENTS` | research, gap_check, coverage, reproducibility | Runs after paper ready |
+| `agents/judge_agent.py` | `MIN_DETECTION_MODELS` | 2 | Required baseline count |
+| `agents/judge_agent.py` | `MIN_MITIGATION_STRATEGIES` | 2 | Required mitigation count |
+| `agents/judge_agent.py` | `MIN_PAPER_LENGTH` | 2000 | Min draft chars |
+| `agents/judge_agent.py` | `REQUIRED_PAPER_SECTIONS` | [...] | Section names |
+| `utils/llm_client.py` | `GEMINI_MODEL` | `gemini-3.1-pro-preview` | Gemini model |
+| `utils/llm_client.py` | `GOOGLE_API_KEY` | env | API key |
+| All agents | `PROJECT_ROOT` | auto-detected | Project root directory |
 
 ---
 
@@ -346,7 +368,7 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # Run full pipeline
-python orchestrator.py
+python main.py
 ```
 
 ### Running with GUI
@@ -357,17 +379,16 @@ A web dashboard streams live logs, metrics, figures, paper sections, and Judge f
 python run_gui.py
 ```
 
-Open http://127.0.0.1:8000 in your browser, then click **Run Pipeline**. The CLI (`python orchestrator.py`) remains available for headless runs.
+Open http://127.0.0.1:8000 in your browser, then click **Run Pipeline**. The CLI (`python main.py`) remains available for headless runs.
 
 ### Individual Agents
 
 ```bash
-python detection_agent.py [seed]   # default seed=42
-python mitigation_agent.py [seed]
-python auditing_agent.py
-python judge_agent.py [detection|mitigation|auditing]
-python judge_agent.py               # evaluate all
-python structure_review.py              # Structure review standalone
+python -m agents.detection_agent [seed]   # default seed=42
+python -m agents.mitigation_agent [seed]
+python -m agents.auditing_agent
+python -m agents.judge_agent [detection|mitigation|auditing]
+python -m agents.judge_agent               # evaluate all
 ```
 
 ### Optional Setup
@@ -408,18 +429,18 @@ python structure_review.py              # Structure review standalone
 
 ### Adding a New Agent
 
-1. Create `new_agent.py` with `main(seed=42)` (or `main()` if deterministic).
-2. Add to `orchestrator.py`: `module_map`, `AGENTS`.
-3. Add `evaluate_new_agent()` in `judge_agent.py` and register in `evaluate()`.
+1. Create `agents/new_agent.py` with `main(seed=42)` (or `main()` if deterministic).
+2. Add to `orchestration/orchestrator.py`: `module_map`, `AGENTS`.
+3. Add `evaluate_new_agent()` in `agents/judge_agent.py` and register in `evaluate()`.
 4. Define output contract and Judge criteria.
 
 ### Customizing Judge Criteria
 
-Edit `judge_agent.py`: `REQUIRED_KEYS_*`, `MIN_*`, `REQUIRED_PAPER_SECTIONS`, or add checks in `evaluate_*()`.
+Edit `agents/judge_agent.py`: `REQUIRED_KEYS_*`, `MIN_*`, `REQUIRED_PAPER_SECTIONS`, or add checks in `evaluate_*()`.
 
 ### Config File
 
-Add `config.yaml` and load in orchestrator and judge; pass to agents via env or args.
+Pipeline configuration is in `configs/pipeline.yaml`. Prompts are in `configs/prompts/`, rules in `configs/rules/`.
 
 ---
 
@@ -434,7 +455,7 @@ Add `config.yaml` and load in orchestrator and judge; pass to agents via env or 
 | Pipeline stops at Detection | Detection fails 3 times | Run `python judge_agent.py detection` for feedback |
 | Gemini not used | No API key | Set `GOOGLE_API_KEY` (see SETUP.md) |
 | PDF not generated | pdflatex not installed | Install MiKTeX/TeX Live or compile manually |
-| LaTeX step appears stuck | Gemini API or pdflatex is slow | **Normal:** Gemini ~1–2 min, pdflatex ~30s. Wait. **If >5 min:** Check `GOOGLE_API_KEY`; run `python latex_generator.py` standalone to isolate; Ctrl+C and re-run. |
+| LaTeX step appears stuck | Gemini API or pdflatex is slow | **Normal:** Gemini ~1–2 min, pdflatex ~30s. Wait. **If >5 min:** Check `GOOGLE_API_KEY`; run `python -m utils.latex_generator` standalone to isolate; Ctrl+C and re-run. |
 
 ---
 
@@ -442,19 +463,22 @@ Add `config.yaml` and load in orchestrator and judge; pass to agents via env or 
 
 ```bash
 # Full pipeline
-python orchestrator.py
+python main.py
+
+# GUI dashboard
+python run_gui.py
 
 # Individual agents
-python detection_agent.py [seed]
-python mitigation_agent.py [seed]
-python auditing_agent.py
+python -m agents.detection_agent [seed]
+python -m agents.mitigation_agent [seed]
+python -m agents.auditing_agent
 
 # Judge only
-python judge_agent.py [detection|mitigation|auditing]
-python judge_agent.py   # evaluate all
+python -m agents.judge_agent [detection|mitigation|auditing]
+python -m agents.judge_agent   # evaluate all
 
-# Structure review
-python structure_review.py
+# Research pipeline only
+python -m orchestration.research_orchestrator
 ```
 
 See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup. See [howto.md](howto.md) for the research workflow.

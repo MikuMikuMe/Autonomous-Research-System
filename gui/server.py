@@ -131,11 +131,14 @@ async def get_mitigation():
 
 @app.get("/api/outputs/paper")
 async def get_paper():
-    path = OUTPUTS_DIR / "paper_draft.md"
+    path = OUTPUTS_DIR / "paper" / "paper.tex"
+    if not path.exists():
+        path = OUTPUTS_DIR / "paper_draft.md"
     if not path.exists():
         return PlainTextResponse("Paper not yet generated.", status_code=404)
     with open(path, encoding="utf-8") as f:
-        return PlainTextResponse(f.read(), media_type="text/markdown")
+        media = "text/x-latex" if str(path).endswith(".tex") else "text/markdown"
+        return PlainTextResponse(f.read(), media_type=media)
 
 
 @app.get("/api/outputs/paper.pdf")

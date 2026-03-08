@@ -15,12 +15,12 @@ sys.path.insert(0, SCRIPT_DIR)
 
 MAX_RETRIES = 3
 AGENTS = ["detection", "mitigation", "auditing"]
-RESEARCH_MODULES = ["research_agent", "gap_check_agent", "coverage_agent", "reproducibility_agent"]
+RESEARCH_MODULES = ["agents.research_agent", "agents.gap_check_agent", "agents.coverage_agent", "agents.reproducibility_agent"]
 
 MODULE_MAP = {
-    "detection": "detection_agent",
-    "mitigation": "mitigation_agent",
-    "auditing": "auditing_agent",
+    "detection": "agents.detection_agent",
+    "mitigation": "agents.mitigation_agent",
+    "auditing": "agents.auditing_agent",
 }
 
 
@@ -90,7 +90,7 @@ def _run_research_module(module_name: str, event_queue: queue.Queue) -> int:
 
 def _run_judge(agent_name: str):
     """Run judge evaluation. Returns (passed, feedback, retry_hint, actionable_feedback)."""
-    from judge_agent import evaluate
+    from agents.judge_agent import evaluate
     r = evaluate(agent_name)
     return r["passed"], r["feedback"], r.get("retry_hint"), r.get("actionable_feedback")
 
@@ -182,7 +182,7 @@ def run_pipeline(event_queue: queue.Queue):
                     env = os.environ.copy()
                     env["JUDGE_FEEDBACK"] = actionable_feedback
                     rev = subprocess.run(
-                        [sys.executable, "-m", "revision_agent"],
+                        [sys.executable, "-m", "agents.revision_agent"],
                         env=env,
                         capture_output=True,
                         text=True,

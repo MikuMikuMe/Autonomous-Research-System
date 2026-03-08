@@ -11,13 +11,13 @@ pipeline:
     - auditing
 
   research_agents:
-    - research_agent
-    - gap_check_agent
-    - coverage_agent
-    - topic_coverage_agent
-    - reproducibility_agent
-    - verification_agent
-    - optimizer_agent
+    - agents.research_agent
+    - agents.gap_check_agent
+    - agents.coverage_agent
+    - agents.topic_coverage_agent
+    - agents.reproducibility_agent
+    - agents.verification_agent
+    - agents.optimizer_agent
 
   judge:
     agent: judge
