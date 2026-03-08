@@ -16,8 +16,8 @@ try:
 except ImportError:
     pass
 
-# Model: gemini-3.1-pro-preview for latest Pro; gemini-2.5-flash for speed
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-pro-preview")
+FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-2.5-pro")
 API_KEY = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 _client = None
@@ -44,6 +44,46 @@ def _get_client():
 def is_available():
     """Return True if Gemini API is configured and usable."""
     return _get_client() is not None
+
+
+def _is_rate_limit_error(err: Exception) -> bool:
+    """Detect rate-limit / quota-exceeded errors from the Gemini API."""
+    err_str = str(err).lower()
+    if "429" in err_str or "resource_exhausted" in err_str or "rate" in err_str:
+        return True
+    type_name = type(err).__name__.lower()
+    return "resourceexhausted" in type_name or "ratelimit" in type_name
+
+
+def _call_with_fallback(client, prompt, config, config_kwargs, use_grounding):
+    """Try DEFAULT_MODEL; on rate-limit, retry once with FALLBACK_MODEL."""
+    from google.genai import types
+
+    try:
+        return _call_model(client, DEFAULT_MODEL, prompt, config, config_kwargs, use_grounding)
+    except Exception as e:
+        if _is_rate_limit_error(e) and FALLBACK_MODEL != DEFAULT_MODEL:
+            print(f"  [LLM] Rate limit on {DEFAULT_MODEL}, falling back to {FALLBACK_MODEL}")
+            return _call_model(client, FALLBACK_MODEL, prompt, config, config_kwargs, use_grounding)
+        raise
+
+
+def _call_model(client, model, prompt, config, config_kwargs, use_grounding):
+    """Call a specific model, stripping grounding tools on failure if needed."""
+    from google.genai import types
+
+    try:
+        return client.models.generate_content(
+            model=model, contents=prompt, config=config,
+        )
+    except Exception as err:
+        if use_grounding and not _is_rate_limit_error(err):
+            config_kwargs.pop("tools", None)
+            config = types.GenerateContentConfig(**config_kwargs)
+            return client.models.generate_content(
+                model=model, contents=prompt, config=config,
+            )
+        raise
 
 
 def generate(
@@ -77,23 +117,9 @@ def generate(
 
         config = types.GenerateContentConfig(**config_kwargs)
 
-        try:
-            response = client.models.generate_content(
-                model=DEFAULT_MODEL,
-                contents=prompt,
-                config=config,
-            )
-        except Exception as grounding_err:
-            if use_grounding:
-                config_kwargs.pop("tools", None)
-                config = types.GenerateContentConfig(**config_kwargs)
-                response = client.models.generate_content(
-                    model=DEFAULT_MODEL,
-                    contents=prompt,
-                    config=config,
-                )
-            else:
-                raise grounding_err
+        response = _call_with_fallback(
+            client, prompt, config, config_kwargs, use_grounding,
+        )
 
         if response and response.text:
             return response.text.strip()
