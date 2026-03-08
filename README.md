@@ -7,6 +7,7 @@ A unified agentic pipeline for bias detection, mitigation, and auditing in finan
 ## Table of Contents
 
 - [Overview](#overview)
+- [Research Workflow](#research-workflow)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Components](#components)
@@ -23,7 +24,7 @@ A unified agentic pipeline for bias detection, mitigation, and auditing in finan
 
 ## Overview
 
-The pipeline runs from dataset loading to a submission-ready paper with LaTeX and PDF (see [howto.md](howto.md)). Each agent corresponds to specific stages and deliverables:
+The pipeline runs from dataset loading to a submission-ready paper with LaTeX and PDF. Each agent corresponds to specific stages and deliverables:
 
 | Stage | Agent | Output |
 |-------|-------|--------|
@@ -32,6 +33,75 @@ The pipeline runs from dataset loading to a submission-ready paper with LaTeX an
 | 3 | **Auditing** | Paper sections, Markdown draft, LaTeX paper, structure review |
 
 After each agent runs, the **Judge** evaluates its output. If the Judge fails an agent, the orchestrator retries (up to 3 times) with different random seeds. The pipeline stops on persistent failure.
+
+---
+
+## Research Workflow
+
+The pipeline automates the end-to-end workflow for producing a technically verified research paper on bias in financial AI.
+
+### Narrative
+
+The paper argues that traditional classifiers (Logistic Regression, Random Forest) inherit representational bias from training data, and that complying with regulatory frameworks like the **EU AI Act** requires specific mitigation strategies. The pipeline proves this technically using real experimental data.
+
+### Detection (Baseline Proof)
+
+The Detection Agent trains baseline models on the [MLG-ULB Credit Card Fraud Detection](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) dataset with a synthetic protected attribute and computes fairness metrics:
+
+- **Disparate Impact (DI):** Proves the proportion of positive outcomes between demographics is skewed.
+- **Equalized Odds (EOD):** Proves that false positive / false negative rates disproportionately affect one demographic.
+- **Deliverable:** A baseline table showing high accuracy but severe violations of EU AI Act fairness thresholds (|SPD| > 0.1 or |EOD| > 0.05).
+
+### Mitigation (The Fix)
+
+The Mitigation Agent applies strategies referenced in the literature:
+
+1. **Pre-processing (SMOTE):** Balances the dataset to fix representational bias. XGBoost responds better to SMOTE than Random Forest.
+2. **Post-processing (Threshold Adjustment):** Dynamically adjusts decision boundaries for the disadvantaged group.
+- **Deliverable:** A comparative matrix (Accuracy vs. Fairness) that technically proves the "asymmetric cost" --- mitigating bias may slightly lower accuracy or increase false positives, establishing the accuracy/fairness trade-off.
+
+### Auditing (Paper Generation)
+
+The Auditing Agent generates the full paper structure:
+
+1. **Background & Taxonomy** --- Sources of bias, fairness metrics, EU AI Act
+2. **Use Case & Data** --- Dataset, synthetic protected attribute, model configurations
+3. **Detection Results** --- Baseline fairness metrics with violation flags
+4. **Mitigation Experiments** --- Comparative matrix, asymmetric cost analysis
+5. **Bias Audit Framework** --- Lifecycle-based oversight (pre-deployment, monitoring, post-deployment, governance)
+6. **Discussion** --- Model selection matters, accuracy/fairness trade-off, post-processing limits
+
+The paper is compiled to IEEE/CUCAI 2026 format LaTeX and PDF.
+
+### Research & Verification
+
+After the paper is ready, the research phase automatically:
+
+- Queries alphaXiv / arXiv / Semantic Scholar for papers supporting claims
+- Checks coverage against reference PDFs (gap analysis)
+- Runs detection/mitigation with multiple seeds to verify reproducibility
+- Generates verification code to validate numerical claims
+
+### Quick Reference (Fairlearn)
+
+```python
+from fairlearn.metrics import demographic_parity_difference, equalized_odds_difference
+from imblearn.over_sampling import SMOTE
+from xgboost import XGBClassifier
+
+# Baseline bias detection
+baseline_model = XGBClassifier().fit(X_train, y_train)
+y_pred = baseline_model.predict(X_test)
+dp_diff = demographic_parity_difference(y_test, y_pred, sensitive_features=A_test)
+eo_diff = equalized_odds_difference(y_test, y_pred, sensitive_features=A_test)
+# Compare against EU AI Act thresholds: |SPD| <= 0.1, |EOD| <= 0.05
+
+# Mitigation via pre-processing (SMOTE)
+smote = SMOTE()
+X_res, y_res = smote.fit_resample(X_train, y_train)
+mitigated_model = XGBClassifier().fit(X_res, y_res)
+# Re-run metrics to prove mitigation effect
+```
 
 ---
 
@@ -151,7 +221,6 @@ QMIND-Agent/
 ├── requirements.txt
 ├── README.md
 ├── SETUP.md
-├── howto.md
 ├── authors.txt
 ├── env.example
 └── kaggle.json.example
@@ -481,4 +550,4 @@ python -m agents.judge_agent   # evaluate all
 python -m orchestration.research_orchestrator
 ```
 
-See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup. See [howto.md](howto.md) for the research workflow.
+See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup.
