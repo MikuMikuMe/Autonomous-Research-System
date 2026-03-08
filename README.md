@@ -107,38 +107,47 @@ mitigated_model = XGBClassifier().fit(X_res, y_res)
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         ORCHESTRATOR (orchestrator.py)                          │
-│  • Runs: Detection → Mitigation → Auditing → Research (alphaXiv, gap, repro)   │
-│  • Invokes Judge after each agent                                              │
-│  • Retries failed agents with seed=42, 43, 44 (up to 3 attempts)               │
-└─────────────────────────────────────────────────────────────────────────────────┘
-         │                         │                         │
-         ▼                         ▼                         ▼
-┌──────────────────┐    ┌──────────────────┐    ┌──────────────────────────┐
-│ Detection Agent  │    │ Mitigation Agent  │    │ Auditing Agent            │
-│                  │    │                  │    │                            │
-│                  │    │                  │    │                            │
-│ • Kaggle dataset │    │ • Load baseline  │    │ • Intro, Background       │
-│ • Synthetic attr │    │ • SMOTE          │    │ • Methodology, Results   │
-│ • LR, BRF        │    │ • XGBoost        │    │ • Audit Framework         │
-│ • Fairness metrics│   │ • Threshold adj  │    │ • Discussion              │
-│ • ROC, bar charts│    │ • Asymmetric cost│    │ • LaTeX + PDF             │
-│ • npz, json      │    │ • Figures        │    │ • Structure review        │
-└────────┬─────────┘    └────────┬─────────┘    └────────────┬─────────────────┘
-         │                      │                          │
-         └──────────────────────┼──────────────────────────┘
-                                ▼
-                    ┌───────────────────────────┐
-                    │   JUDGE AGENT             │
-                    │                           │
-                    │ • Rule-based: files,      │
-                    │   schema, sections, tables │
-                    │ • Gemini (optional):      │
-                    │   quality, consistency,   │
-                    │   claim support           │
-                    └───────────────────────────┘
+```mermaid
+flowchart TB
+    Start(["Start Pipeline"]) --> Det["Detection Agent"]
+    Det --> J1{"Judge"}
+    J1 -->|"Pass"| Mit["Mitigation Agent"]
+    J1 -->|"Fail (new seed)"| Det
+    J1 -->|"3 Failures"| Fail(["Pipeline Failed"])
+    Mit --> J2{"Judge"}
+    J2 -->|"Pass"| Aud["Auditing Agent"]
+    J2 -->|"Fail (new seed)"| Mit
+    J2 -->|"3 Failures"| Fail
+    Aud --> FC["Format Check"]
+    FC --> J3{"Judge"}
+    J3 -->|"Pass"| Res["Research Phase"]
+    J3 -->|"Claims Issue"| VerCheck["Verification Agent"]
+    VerCheck --> Rev["Revision Agent"]
+    Rev -->|"Re-evaluate"| J3
+    J3 -->|"Fail (retry)"| Aud
+    J3 -->|"3 Failures"| Fail
+    Res --> RA["Research Agent"]
+    Res --> GC["Gap Check"]
+    Res --> Cov["Coverage Agent"]
+    Res --> Rep["Reproducibility"]
+    RA --> Mem["Memory Agent"]
+    GC --> Mem
+    Cov --> Mem
+    Rep --> Mem
+    Mem --> Opt["Optimizer Agent"]
+    Opt --> Done(["Pipeline Complete"])
+    Opt -.->|"Refined prompts (next run)"| Start
+    style Start fill:#2E7D32,color:#fff
+    style Done fill:#2E7D32,color:#fff
+    style Fail fill:#C62828,color:#fff
+    style J1 fill:#E65100,color:#fff
+    style J2 fill:#E65100,color:#fff
+    style J3 fill:#E65100,color:#fff
+    style Rev fill:#1565C0,color:#fff
+    style VerCheck fill:#1565C0,color:#fff
+    style FC fill:#6A1B9A,color:#fff
+    style Opt fill:#00695C,color:#fff
+    style Mem fill:#00695C,color:#fff
 ```
 
 **Execution model:** Agents run as subprocesses (`python -m agents.detection_agent 42`). The orchestrator does not modify agent code; it controls invocation order, seed, and retry count.
