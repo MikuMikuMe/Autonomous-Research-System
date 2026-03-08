@@ -103,6 +103,28 @@ Model & Acc & F1 & AUC & FPR & DPD & EOD & DI & SPD Viol & EOD Viol \\
     )
 
 
+def _strip_document_wrapper(section_text: str) -> str:
+    """Remove document-level LaTeX commands that individual sections should not contain.
+    Sections are body content only — the wrapper is added by assemble_paper_from_sections."""
+    if not section_text:
+        return ""
+    s = section_text
+    s = re.sub(r"\\documentclass\[?[^\]]*\]?\{[^}]*\}", "", s)
+    s = re.sub(r"\\usepackage(\[[^\]]*\])?\{[^}]*\}", "", s)
+    s = re.sub(r"\\graphicspath\{[^}]*\}", "", s)
+    s = re.sub(r"\\title\{[^}]*\}", "", s)
+    s = re.sub(r"\\author\{[\s\S]*?(?:\n\}|\})", "", s)
+    s = re.sub(r"\\begin\{document\}", "", s)
+    s = re.sub(r"\\end\{document\}", "", s)
+    s = re.sub(r"\\maketitle", "", s)
+    abstract_match = re.search(
+        r"\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}", s
+    )
+    if abstract_match:
+        s = s[:abstract_match.start()] + s[abstract_match.end():]
+    return s.strip()
+
+
 def assemble_paper_from_sections(section_contents: list[str], author_block: str) -> str:
     """Assemble full paper.tex from LaTeX section contents. No markdown."""
     abstract = (
@@ -112,11 +134,13 @@ def assemble_paper_from_sections(section_contents: list[str], author_block: str)
         "violations of EU AI Act fairness thresholds. We apply pre-processing (SMOTE) and post-processing "
         "(threshold adjustment). We propose a lifecycle-based bias-audit framework aligned with the EU AI Act."
     )
-    # Find bibliography section (contains \bibliography); rest are main content
+    cleaned = [_strip_document_wrapper(s) for s in section_contents]
     main_sections = []
     ref_section = ""
-    for s in section_contents:
-        if "\\bibliography" in (s or ""):
+    for s in cleaned:
+        if not s:
+            continue
+        if "\\bibliography" in s or "\\bibitem" in s:
             ref_section = s
         else:
             main_sections.append(s)

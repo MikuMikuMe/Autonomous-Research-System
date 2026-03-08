@@ -2,19 +2,28 @@
 Unified Agentic System — Orchestrator
 Runs Detection → Mitigation → Auditing → Research (alphaXiv, gap check, coverage, reproducibility).
 Judge Agent evaluates each core output; failed agents are retried with feedback.
+Uses PipelineContext for shared state, EventBus for typed events,
+and MemoryStore for rich self-evolution memory.
 """
 
 import os
 import sys
 import subprocess
+import time
+import traceback
 from datetime import datetime
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
 MAX_RETRIES = 3
 
-# Config composition (Phase 4): load from pipeline.yaml if present
+from utils.context import PipelineContext
+from utils.events import EventBus, EventType
+from utils.schemas import AgentRunRecord, VerificationRecord
+
+
 def _load_pipeline_config():
     path = os.path.join(PROJECT_ROOT, "configs", "pipeline.yaml")
     if not os.path.exists(path):
@@ -41,6 +50,22 @@ RESEARCH_AGENTS = _pipeline.get("research_agents") or [
 ]
 
 
+def _classify_error(exc: Exception | None, stderr: str = "") -> str:
+    """Classify an error into a category for memory storage."""
+    msg = str(exc) if exc else stderr
+    if "LaTeX" in msg or "pdflatex" in msg:
+        return "LaTeXCompileError"
+    if "timeout" in msg.lower() or "timed out" in msg.lower():
+        return "GeminiTimeout"
+    if "schema" in msg.lower() or "missing key" in msg.lower():
+        return "SchemaValidation"
+    if "FileNotFoundError" in msg or "not found" in msg.lower():
+        return "FileNotFound"
+    if "JSONDecodeError" in msg:
+        return "JSONParse"
+    return "Unknown"
+
+
 def run_agent(agent_name: str, seed: int = 42) -> bool:
     """Run an agent as subprocess. Returns True if exit code 0."""
     module_map = {
@@ -55,26 +80,27 @@ def run_agent(agent_name: str, seed: int = 42) -> bool:
 
 
 def run_judge(agent_name: str):
-    """Run judge evaluation for an agent. Returns (passed, feedback, retry_hint, actionable_feedback)."""
+    """Run judge evaluation for an agent. Returns JudgeResult dataclass."""
     from agents.judge_agent import evaluate
-    r = evaluate(agent_name)
-    return r["passed"], r["feedback"], r.get("retry_hint"), r.get("actionable_feedback")
+    return evaluate(agent_name)
 
 
 def parse_retry_hint(hint: str) -> int:
     """Extract seed from retry hint for detection/mitigation. Returns incrementing seed."""
     if hint and "different_seed" in str(hint):
-        return None  # Signal: use different seed
+        return None
     return 42
 
 
-def run_research_phase():
+def run_research_phase(bus: EventBus):
     """Run research pipeline: alphaXiv, gap check, coverage, reproducibility."""
     print("\n" + "─" * 70)
     print("  RESEARCH PHASE — alphaXiv, Gap Check, Coverage, Reproducibility")
     print("─" * 70)
+    bus.log("research", "RESEARCH PHASE — alphaXiv, Gap Check, Coverage, Reproducibility")
     for module in RESEARCH_AGENTS:
         print(f"\n  >> {module}")
+        bus.log("research", f"Running {module}...")
         result = subprocess.run(
             [sys.executable, "-m", module],
             cwd=PROJECT_ROOT,
@@ -91,26 +117,52 @@ def main():
     print("  Judge evaluates core agents; Research runs after paper is ready")
     print("=" * 70)
 
+    ctx = PipelineContext(seed=42)
+    bus = EventBus()
+    bus.subscribe(lambda e: None)  # CLI: no GUI queue
+
+    # Initialize memory store
+    try:
+        from agents.memory_agent import MemoryStore
+        memory = MemoryStore()
+    except ImportError:
+        memory = None
+
+    pipeline_start = time.time()
     results = {}
+    agent_run_records: list[AgentRunRecord] = []
     seed = 42
 
     for agent_name in AGENTS:
         print(f"\n{'─' * 70}")
         print(f"  AGENT: {agent_name.upper()}")
         print("─" * 70)
+        bus.started(agent_name)
 
         for attempt in range(1, MAX_RETRIES + 1):
             if attempt > 1:
-                seed = 42 + attempt  # Vary seed on retry
+                seed = 42 + attempt
                 print(f"\n  [RETRY {attempt}/{MAX_RETRIES}] seed={seed}")
 
-            # Run agent
+            agent_start = time.time()
+            error_msg = None
+            error_type = None
+
             success = run_agent(agent_name, seed=seed)
+            agent_duration = time.time() - agent_start
+
             if not success:
+                error_msg = f"Agent exited with error (non-zero exit code)"
+                error_type = "SubprocessError"
                 print(f"\n  [JUDGE] Agent exited with error. Retrying...")
+                agent_run_records.append(AgentRunRecord(
+                    agent=agent_name, seed=seed, attempt=attempt,
+                    passed=False, duration_seconds=agent_duration,
+                    error=error_msg, error_type=error_type,
+                ))
                 continue
 
-            # Format check (auditing only): validate and fix table/format issues before Judge
+            # Format check (auditing only)
             if agent_name == "auditing":
                 try:
                     from agents.format_check_agent import run_format_check, apply_format_fixes
@@ -121,40 +173,84 @@ def main():
                 except ImportError:
                     pass
 
-            # Judge evaluates
-            passed, feedback, retry_hint, actionable_feedback = run_judge(agent_name)
+            # Load context from files after agent completes
+            ctx = PipelineContext.load(seed=seed)
 
-            for msg in feedback:
-                prefix = "  ✓" if passed else "  ✗"
+            # Judge evaluates — returns JudgeResult dataclass
+            judge_result = run_judge(agent_name)
+
+            for msg in judge_result.feedback:
+                prefix = "  ✓" if judge_result.passed else "  ✗"
                 print(f"{prefix} {msg}")
 
-            if passed:
+            bus.judge_result(
+                agent_name, judge_result.passed, judge_result.feedback,
+                judge_result.retry_hint, attempt,
+            )
+
+            # Capture metrics snapshot for memory
+            metrics_snap = None
+            if agent_name == "detection" and ctx.baseline:
+                metrics_snap = ctx.baseline.to_dict()
+            elif agent_name == "mitigation" and ctx.mitigation:
+                metrics_snap = ctx.mitigation.to_dict()
+
+            if judge_result.passed:
                 results[agent_name] = {"passed": True, "attempts": attempt}
                 print(f"\n  → {agent_name} PASSED (attempt {attempt})")
+                bus.finished(agent_name, 0)
+                bus.outputs_updated(agent_name)
+                agent_run_records.append(AgentRunRecord(
+                    agent=agent_name, seed=seed, attempt=attempt,
+                    passed=True, duration_seconds=agent_duration,
+                    metrics_snapshot=metrics_snap,
+                    judge_feedback=judge_result.feedback,
+                ))
                 break
             else:
-                print(f"\n  [JUDGE] FAILED. Retry hint: {retry_hint}")
+                print(f"\n  [JUDGE] FAILED. Retry hint: {judge_result.retry_hint}")
 
-                # AI Court / Autogenesis: Judge delegates fix → Verification (code-based) → Revision (Observe → Optimize)
-                if retry_hint == "revise_claims" and actionable_feedback:
-                    # Remember: persist failure for Optimizer
+                if judge_result.retry_hint == "revise_claims" and judge_result.actionable_feedback:
                     try:
                         from agents.memory_agent import persist_event
-                        persist_event(agent_name, "failed", actionable_feedback)
+                        persist_event(agent_name, "failed", judge_result.actionable_feedback)
                     except ImportError:
                         pass
-                    # Optional: Verification Agent generates code, runs it to verify claims (never hardcode)
+
+                    # Verification Agent
+                    verification_records: list[VerificationRecord] = []
                     try:
                         from agents.verification_agent import verify_paper_claims
                         vreport = verify_paper_claims()
-                        if vreport.get("claims") and any(c.get("verified") is False for c in vreport["claims"]):
-                            evidence = "; ".join(c.get("evidence", c.get("error", ""))[:100] for c in vreport["claims"] if c.get("verified") is False)
-                            actionable_feedback = f"{actionable_feedback}\n\n[Verification Agent] Code-based check: {evidence}"
+                        if vreport.get("claims"):
+                            for c in vreport["claims"]:
+                                verification_records.append(VerificationRecord(
+                                    claim=c.get("claim", ""),
+                                    verified=c.get("verified"),
+                                    evidence=c.get("evidence", ""),
+                                    error=c.get("error"),
+                                ))
+                            ctx.verifications.extend(verification_records)
+                            failed_claims = [c for c in vreport["claims"] if c.get("verified") is False]
+                            if failed_claims:
+                                evidence = "; ".join(
+                                    c.get("evidence", c.get("error", ""))[:100] for c in failed_claims
+                                )
+                                judge_result = judge_result.__class__(
+                                    passed=judge_result.passed,
+                                    feedback=judge_result.feedback,
+                                    retry_hint=judge_result.retry_hint,
+                                    actionable_feedback=(
+                                        f"{judge_result.actionable_feedback}\n\n"
+                                        f"[Verification Agent] Code-based check: {evidence}"
+                                    ),
+                                )
                     except ImportError:
                         pass
+
                     print("  [REVISION] Invoking Revision Agent to fix claim contradictions...")
                     env = os.environ.copy()
-                    env["JUDGE_FEEDBACK"] = actionable_feedback
+                    env["JUDGE_FEEDBACK"] = judge_result.actionable_feedback or ""
                     rev = subprocess.run(
                         [sys.executable, "-m", "agents.revision_agent"],
                         env=env,
@@ -164,24 +260,42 @@ def main():
                     )
                     if rev.returncode == 0:
                         print("  [REVISION] Applied. Re-running Judge...")
-                        passed2, feedback2, _, _ = run_judge(agent_name)
-                        for msg in feedback2:
-                            prefix = "  ✓" if passed2 else "  ✗"
+                        judge_result2 = run_judge(agent_name)
+                        for msg in judge_result2.feedback:
+                            prefix = "  ✓" if judge_result2.passed else "  ✗"
                             print(f"{prefix} {msg}")
-                        if passed2:
+                        if judge_result2.passed:
                             results[agent_name] = {"passed": True, "attempts": attempt}
                             print(f"\n  → {agent_name} PASSED after revision (attempt {attempt})")
+                            bus.finished(agent_name, 0)
+                            agent_run_records.append(AgentRunRecord(
+                                agent=agent_name, seed=seed, attempt=attempt,
+                                passed=True, duration_seconds=time.time() - agent_start,
+                                metrics_snapshot=metrics_snap,
+                                judge_feedback=judge_result2.feedback,
+                            ))
                             break
                     else:
                         print(f"  [REVISION] Failed: {rev.stderr or rev.stdout or 'unknown'}")
 
+                agent_run_records.append(AgentRunRecord(
+                    agent=agent_name, seed=seed, attempt=attempt,
+                    passed=False, duration_seconds=agent_duration,
+                    error="; ".join(judge_result.feedback[:3]),
+                    error_type=_classify_error(None, "; ".join(judge_result.feedback)),
+                    metrics_snapshot=metrics_snap,
+                    judge_feedback=judge_result.feedback,
+                    retry_hint=judge_result.retry_hint,
+                ))
+
                 if attempt == MAX_RETRIES:
-                    results[agent_name] = {"passed": False, "attempts": attempt, "feedback": feedback}
+                    results[agent_name] = {"passed": False, "attempts": attempt, "feedback": judge_result.feedback}
                     print(f"\n  → {agent_name} FAILED after {MAX_RETRIES} attempts. Stopping pipeline.")
+                    bus.finished(agent_name, 1)
                     break
 
         if not results.get(agent_name, {}).get("passed"):
-            break  # Stop pipeline on failure
+            break
 
     # Summary
     print("\n" + "=" * 70)
@@ -193,16 +307,27 @@ def main():
         print(f"  {name:<12} {status}  (attempts: {attempts})")
     print("=" * 70)
 
-    # Remember: persist session to memory for self-evolution (Optimizer)
-    try:
-        from agents.memory_agent import persist_session
-        persist_session(results)
-    except ImportError:
-        pass
-
     all_passed = all(r["passed"] for r in results.values())
+    total_duration = time.time() - pipeline_start
+
+    # Persist rich memory
+    if memory:
+        try:
+            memory.persist_run_from_context(
+                ctx,
+                seed=seed,
+                all_passed=all_passed,
+                total_duration=total_duration,
+                agent_runs=agent_run_records,
+                verifications=ctx.verifications,
+            )
+        except Exception:
+            traceback.print_exc()
+
+    bus.pipeline_finished(all_passed, results)
+
     if all_passed:
-        run_research_phase()
+        run_research_phase(bus)
         print("\n" + "=" * 70)
         print("  ALL PHASES COMPLETE")
         print("=" * 70)

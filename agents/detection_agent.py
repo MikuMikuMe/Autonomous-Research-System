@@ -337,8 +337,14 @@ def save_results(all_metrics, X_train, X_test, y_train, y_test, A_train, A_test)
 # ====================================================================
 
 
-def main(seed=42):
-    """Run detection pipeline. seed can be varied for retries (e.g. if judge requests)."""
+def main(seed=42, context=None):
+    """Run detection pipeline. seed can be varied for retries (e.g. if judge requests).
+
+    When *context* (a PipelineContext) is provided, the typed BaselineResults
+    are also written into context.baseline — the orchestrator can pass them to
+    subsequent agents without going through the file system.  Standalone
+    execution (context=None) still works exactly as before.
+    """
     # ---- HOUR 1 ----
     df = download_dataset()
     df = inject_protected_attribute(df, seed=seed)
@@ -366,6 +372,18 @@ def main(seed=42):
         ("Balanced Random Forest", y_test, brf_score),
     ])
     save_results(all_metrics, X_train, X_test, y_train, y_test, A_train, A_test)
+
+    # Write typed results into context when available
+    try:
+        from utils.schemas import BaselineResults, ModelMetrics
+        baseline = BaselineResults(
+            baseline_metrics=[ModelMetrics.from_dict(m) for m in all_metrics]
+        )
+        if context is not None:
+            context.baseline = baseline
+        return baseline
+    except ImportError:
+        pass
 
     print("\n  Detection Agent complete. Baseline bias assessment ready.")
     print("  Hand off outputs/ directory to Mitigation Agent.\n")

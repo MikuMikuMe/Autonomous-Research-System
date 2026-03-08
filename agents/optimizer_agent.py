@@ -1,10 +1,12 @@
 """
 Optimizer Agent — Propose prompt/solution updates from memory (Observe → Optimize).
 
-Design: Review outputs/memory/ sessions and events. Use Gemini to propose prompt
-refinements (e.g., "When accuracy_delta>0, always mention AUC/Recall") based on
-recurring failures. Output proposals to outputs/optimizer_proposals.json for
-manual or automated commit. Use --apply to apply proposals to configs/prompts/.
+Uses MemoryStore SQL queries to ground proposals in structured data instead of
+truncated JSON blobs. Queries metric trends, failure patterns, verification
+history, and per-model EOD history to propose prompt refinements.
+
+Output proposals to outputs/optimizer_proposals.json for manual or automated
+commit. Use --apply to apply proposals to configs/prompts/.
 """
 
 import os
@@ -17,8 +19,96 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 CONFIGS_DIR = os.path.join(PROJECT_ROOT, "configs")
 PROMPTS_DIR = os.path.join(CONFIGS_DIR, "prompts")
-MEMORY_DIR = os.path.join(OUTPUT_DIR, "memory")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+
+def _build_memory_context() -> str:
+    """Build a structured context string from MemoryStore SQL queries."""
+    try:
+        from agents.memory_agent import MemoryStore
+        store = MemoryStore()
+    except ImportError:
+        return _build_legacy_context()
+
+    sections = []
+
+    # EOD trend
+    eod_trend = store.metric_trend("best_eod", limit=10)
+    if eod_trend:
+        lines = [f"  {ts}: {val}" for ts, val in eod_trend if val is not None]
+        if lines:
+            sections.append("EOD TREND (best_eod across runs):\n" + "\n".join(lines))
+
+    # Failure patterns
+    failures = store.failure_patterns(limit=20)
+    if failures:
+        lines = [f"  {etype}: {count} occurrences" for etype, count in failures.items()]
+        sections.append("FAILURE PATTERNS:\n" + "\n".join(lines))
+
+    # Success rates
+    for agent in ["detection", "mitigation", "auditing"]:
+        rate = store.success_rate(agent)
+        sections.append(f"SUCCESS RATE ({agent}): {rate:.1%}")
+
+    # Unverified claims
+    unverified = store.unverified_claims(limit=5)
+    if unverified:
+        lines = [f"  - {c.get('claim', '?')[:80]}" for c in unverified]
+        sections.append("UNVERIFIED CLAIMS (keep failing verification):\n" + "\n".join(lines))
+
+    # Recent failed agent runs with feedback
+    for agent in ["auditing", "mitigation"]:
+        failed = store.what_failed(agent, limit=3)
+        if failed:
+            lines = []
+            for f in failed:
+                fb = f.get("judge_feedback", "[]")
+                try:
+                    fb_list = json.loads(fb) if isinstance(fb, str) else fb
+                except json.JSONDecodeError:
+                    fb_list = [fb]
+                lines.append(f"  attempt={f.get('attempt')}: {'; '.join(str(x)[:80] for x in fb_list[:2])}")
+            sections.append(f"RECENT FAILURES ({agent}):\n" + "\n".join(lines))
+
+    # Model-level metrics
+    model_metrics = store.all_model_metrics(limit=30)
+    if model_metrics:
+        model_summary = {}
+        for m in model_metrics:
+            name = m.get("model", "?")
+            if name not in model_summary:
+                model_summary[name] = {"eod_values": [], "dpd_values": []}
+            if m.get("eod") is not None:
+                model_summary[name]["eod_values"].append(m["eod"])
+            if m.get("dpd") is not None:
+                model_summary[name]["dpd_values"].append(m["dpd"])
+        lines = []
+        for name, data in model_summary.items():
+            eod_vals = data["eod_values"]
+            if eod_vals:
+                avg_eod = sum(abs(v) for v in eod_vals) / len(eod_vals)
+                lines.append(f"  {name}: avg|EOD|={avg_eod:.4f} ({len(eod_vals)} runs)")
+        if lines:
+            sections.append("MODEL EOD SUMMARY:\n" + "\n".join(lines))
+
+    store.close()
+
+    if not sections:
+        return _build_legacy_context()
+
+    return "\n\n".join(sections)
+
+
+def _build_legacy_context() -> str:
+    """Fallback: build context from legacy JSON files."""
+    try:
+        from agents.memory_agent import load_recent_sessions, load_recent_events
+    except ImportError:
+        return ""
+    sessions = load_recent_sessions(limit=5)
+    events = load_recent_events(limit=30)
+    context = {"sessions": sessions, "events": events[:15]}
+    return json.dumps(context, indent=2)[:8000]
 
 
 def run_optimizer() -> dict:
@@ -27,40 +117,37 @@ def run_optimizer() -> dict:
     Returns {proposals: [...], summary: str}.
     """
     try:
-        from agents.memory_agent import load_recent_sessions, load_recent_events
         from utils.llm_client import generate, is_available
     except ImportError:
         return {"proposals": [], "summary": "Optimizer dependencies not available."}
 
-    sessions = load_recent_sessions(limit=5)
-    events = load_recent_events(limit=30)
-
-    if not sessions and not events:
-        return {"proposals": [], "summary": "No memory to analyze."}
-
     if not is_available():
         return {"proposals": [], "summary": "Gemini unavailable. Set GOOGLE_API_KEY."}
 
-    # Build context for Gemini
-    context = {
-        "sessions": sessions,
-        "events": events[:15],
-    }
-    context_str = json.dumps(context, indent=2)[:8000]
+    context_str = _build_memory_context()
+    if not context_str:
+        return {"proposals": [], "summary": "No memory to analyze."}
 
-    prompt = f"""You are an optimizer for a research paper pipeline. Review the session and event memory below. Identify recurring failure patterns (e.g., "auditing fails when claim contradicts data", "accuracy_delta>0 but paper claims accuracy loss").
+    prompt = f"""You are an optimizer for a bias audit research paper pipeline. Review the structured memory data below. Identify recurring failure patterns and propose targeted prompt refinements.
 
-Propose 1-3 prompt refinements that would reduce these failures. Each proposal should:
-1. Target a specific prompt (e.g., trade_off_summary, mitigation_claims)
-2. Add a rule or instruction (e.g., "When accuracy_delta>0, NEVER claim accuracy loss; mention AUC/Recall instead")
-3. Explain why (reference the failure pattern)
+The data includes:
+- EOD TREND: best Equalized Odds Difference across pipeline runs (lower = better, target <= 0.05)
+- FAILURE PATTERNS: classified error types and their frequency
+- UNVERIFIED CLAIMS: paper claims that code-based verification keeps refuting
+- RECENT FAILURES: agent failures with judge feedback
+- MODEL EOD SUMMARY: per-model average |EOD| across runs
 
-Memory:
+Propose 1-3 prompt refinements that would reduce failures. Each proposal should:
+1. Target a specific prompt file (e.g., trade_off_summary, mitigation_claims, verification)
+2. Add a concrete rule or instruction
+3. Reference the data pattern that motivates it
+
+Memory data:
 {context_str}
 
 Respond with a JSON array only:
 [
-  {{"prompt": "trade_off_summary", "rule": "string", "reason": "string"}},
+  {{"prompt": "target_prompt_name", "rule": "the new rule to add", "reason": "data-grounded reason"}},
   ...
 ]
 If no actionable proposals, return [].

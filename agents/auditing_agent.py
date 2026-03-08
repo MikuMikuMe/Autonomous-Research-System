@@ -785,8 +785,61 @@ def generate_references():
     return content
 
 
+REQUIRED_SECTION_KEYWORDS = [
+    "Introduction", "Background", "Use Case", "Detection Results",
+    "Mitigation", "Audit Framework", "Discussion",
+]
+MIN_SECTION_LENGTH = 200
+
+
+def _validate_paper_structure(full_tex):
+    """Pre-judge guardrail: catch structural defects before the paper reaches the judge.
+    Returns (ok, issues) where issues is a list of problem descriptions."""
+    issues = []
+
+    abstract_count = full_tex.lower().count("\\begin{abstract}")
+    if abstract_count > 1:
+        issues.append(f"Duplicated abstract ({abstract_count} occurrences)")
+
+    doc_count = full_tex.count("\\begin{document}")
+    if doc_count > 1:
+        issues.append(f"Multiple \\begin{{document}} ({doc_count}) — sections may contain full document wrappers")
+
+    for kw in REQUIRED_SECTION_KEYWORDS:
+        if kw.lower() not in full_tex.lower():
+            issues.append(f"Missing required section: {kw}")
+
+    if "\\begin{table" not in full_tex and "Model" not in full_tex:
+        issues.append("No results tables found — detection/mitigation data likely missing")
+
+    lines = full_tex.strip().split("\n")
+    if len(lines) < 100:
+        issues.append(f"Paper suspiciously short ({len(lines)} lines) — likely truncated")
+
+    section_bodies = re.split(r"\\section\*?\{", full_tex)
+    for i, body in enumerate(section_bodies[1:], 1):
+        title_end = body.find("}")
+        title = body[:title_end].strip() if title_end > 0 else f"Section {i}"
+        content = body[title_end + 1:] if title_end > 0 else body
+        next_sec = re.search(r"\\section|\\end\{document\}", content)
+        section_text = content[:next_sec.start()] if next_sec else content
+        if len(section_text.strip()) < MIN_SECTION_LENGTH:
+            issues.append(f"Section '{title}' is nearly empty ({len(section_text.strip())} chars)")
+
+    chunks = re.findall(r".{200}", full_tex)
+    seen = set()
+    for chunk in chunks:
+        if chunk in seen:
+            snippet = chunk[:60].replace("\n", " ")
+            issues.append(f"Duplicate content block detected: \"{snippet}...\"")
+            break
+        seen.add(chunk)
+
+    return len(issues) == 0, issues
+
+
 def assemble_paper_tex():
-    """Assemble paper.tex from LaTeX section files. No markdown."""
+    """Assemble paper.tex from LaTeX section files. Validates structure before writing."""
     sections = sorted(
         f for f in os.listdir(SECTIONS_DIR)
         if f.endswith(".tex")
@@ -807,6 +860,13 @@ def assemble_paper_tex():
         print("  [ ] latex_generator not available.")
         return None
 
+    expected_prefixes = ["01_", "02_", "03_", "04_", "05_", "06_"]
+    found_prefixes = {f[:3] for f in sections}
+    missing = [p for p in expected_prefixes if p not in found_prefixes]
+    if missing:
+        print(f"  [!] Warning: expected section files missing: {missing}")
+        print(f"      Found: {sections}")
+
     tex_path = os.path.join(OUTPUT_DIR, "paper", "paper.tex")
     os.makedirs(os.path.dirname(tex_path), exist_ok=True)
 
@@ -814,7 +874,10 @@ def assemble_paper_tex():
     for sec_file in sections:
         path = os.path.join(SECTIONS_DIR, sec_file)
         with open(path, encoding="utf-8") as f:
-            section_contents.append(f.read())
+            content = f.read()
+        if len(content.strip()) < 50:
+            print(f"  [!] Warning: section {sec_file} is nearly empty ({len(content.strip())} chars)")
+        section_contents.append(content)
 
     authors = _load_authors()
     author_block = _latex_author_block(authors)
@@ -822,10 +885,56 @@ def assemble_paper_tex():
     full_tex = assemble_paper_from_sections(section_contents, author_block)
     full_tex = _fix_table_collisions(full_tex)
     full_tex = _clean_paper_content(full_tex)
+
+    ok, issues = _validate_paper_structure(full_tex)
+    if not ok:
+        print("\n  [GUARDRAIL] Paper structure validation FAILED before judge:")
+        for issue in issues:
+            print(f"    - {issue}")
+        print("  Attempting auto-repair...", flush=True)
+        full_tex = _auto_repair_paper(full_tex, issues)
+        ok2, issues2 = _validate_paper_structure(full_tex)
+        if not ok2:
+            print("  [GUARDRAIL] Issues remain after auto-repair:")
+            for issue in issues2:
+                print(f"    - {issue}")
+
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write(full_tex)
     print(f"\n  Assembled LaTeX paper: {tex_path}")
     return tex_path
+
+
+def _auto_repair_paper(tex, issues):
+    """Attempt to fix common structural problems automatically."""
+    issue_text = " ".join(issues).lower()
+
+    if "duplicated abstract" in issue_text:
+        first = tex.find("\\begin{abstract}")
+        if first >= 0:
+            second = tex.find("\\begin{abstract}", first + 1)
+            if second >= 0:
+                end_second = tex.find("\\end{abstract}", second)
+                if end_second >= 0:
+                    tex = tex[:second] + tex[end_second + len("\\end{abstract}"):]
+                    print("    Auto-repaired: removed duplicate abstract")
+
+    if "multiple \\begin{document}" in issue_text:
+        first = tex.find("\\begin{document}")
+        if first >= 0:
+            while True:
+                second = tex.find("\\begin{document}", first + 1)
+                if second < 0:
+                    break
+                tex = tex[:second] + tex[second + len("\\begin{document}"):]
+                print("    Auto-repaired: removed extra \\begin{document}")
+        first_end = tex.find("\\end{document}")
+        last_end = tex.rfind("\\end{document}")
+        if first_end >= 0 and last_end > first_end:
+            tex = tex[:first_end] + tex[first_end + len("\\end{document}"):last_end] + tex[last_end:]
+            print("    Auto-repaired: removed premature \\end{document}")
+
+    return tex
 
 
 # ====================================================================
@@ -833,7 +942,12 @@ def assemble_paper_tex():
 # ====================================================================
 
 
-def main():
+def main(context=None):
+    """Run auditing/writing pipeline.
+
+    When *context* (a PipelineContext) is provided, data is read from context
+    fields when available, falling back to file I/O for standalone execution.
+    """
     print("=" * 64)
     print("  AUDITING / WRITING AGENT — Paper Section Generation")
     print("=" * 64)
@@ -844,6 +958,12 @@ def main():
     _progress(0.1, "Introduction & Background")
     baseline_data = _load_json("baseline_results.json")
     mitigation_data = _load_json("mitigation_results.json")
+
+    if context is not None:
+        if context.baseline and not baseline_data:
+            baseline_data = context.baseline.to_dict()
+        if context.mitigation and not mitigation_data:
+            mitigation_data = context.mitigation.to_dict()
     generate_introduction(mitigation_data, baseline_data)
     generate_background()
 

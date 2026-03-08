@@ -583,8 +583,13 @@ def _print_short(m):
 # ====================================================================
 
 
-def main(seed=42):
-    """Run mitigation pipeline. seed can be varied for retries."""
+def main(seed=42, context=None):
+    """Run mitigation pipeline. seed can be varied for retries.
+
+    When *context* (a PipelineContext) is provided, baseline data is read from
+    context.baseline if available (falling back to file I/O), and the typed
+    MitigationResults are written into context.mitigation.
+    """
     print("=" * 64)
     print("  MITIGATION AGENT — SMOTE + Threshold Adjustment")
     print("=" * 64)
@@ -645,6 +650,32 @@ def main(seed=42):
     if eod_rw:
         mitigation_metrics.append(eod_rw[2])
 
+    # 2c. Re-train baseline models and apply ThresholdOptimizer to them.
+    #     BRF has the best AUC — ThresholdOptimizer should achieve EOD compliance
+    #     with a much smaller accuracy hit than Reweighted LR.
+    _progress(0.62, "EOD-Opt on baseline models")
+    from imblearn.ensemble import BalancedRandomForestClassifier
+
+    brf_model = BalancedRandomForestClassifier(
+        n_estimators=100, random_state=seed, n_jobs=-1
+    )
+    brf_model.fit(X_train, y_train)
+    eod_brf = run_eod_threshold_optimizer(
+        brf_model, X_train, y_train, A_train, X_test, y_test, A_test,
+        label_suffix="(Balanced RF)"
+    )
+    if eod_brf:
+        mitigation_metrics.append(eod_brf[2])
+
+    lr_model = LogisticRegression(max_iter=1000, random_state=seed, class_weight="balanced")
+    lr_model.fit(X_train, y_train)
+    eod_lr = run_eod_threshold_optimizer(
+        lr_model, X_train, y_train, A_train, X_test, y_test, A_test,
+        label_suffix="(Logistic Reg)"
+    )
+    if eod_lr:
+        mitigation_metrics.append(eod_lr[2])
+
     # 3. In-processing: ExponentiatedGradient (EqualizedOdds)
     _progress(0.65, "ExponentiatedGradient")
     eg_result = train_eod_exponentiated_gradient(
@@ -660,6 +691,22 @@ def main(seed=42):
     plot_comparison(baseline_metrics, mitigation_metrics)
     save_mitigation_results(baseline_metrics, mitigation_metrics, asymmetric_cost)
     _progress(1.0, "Mitigation complete")
+
+    # Write typed results into context when available
+    try:
+        from utils.schemas import MitigationResults, ModelMetrics, AsymmetricCostAnalysis
+        result = MitigationResults(
+            baseline_metrics=[ModelMetrics.from_dict(m) for m in baseline_metrics],
+            mitigation_metrics=[ModelMetrics.from_dict(m) for m in mitigation_metrics],
+            asymmetric_cost_analysis=(
+                AsymmetricCostAnalysis.from_dict(asymmetric_cost) if asymmetric_cost else None
+            ),
+        )
+        if context is not None:
+            context.mitigation = result
+        return result
+    except ImportError:
+        pass
 
     print("\n  Mitigation Agent complete.")
     print("  Outputs: Comparative matrix + Asymmetric Cost trade-off.")

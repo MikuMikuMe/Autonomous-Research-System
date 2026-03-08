@@ -168,6 +168,9 @@ def verify_paper_claims() -> dict:
     """
     Verify key claims in the paper against mitigation_results.json and baseline_results.json.
     Uses Gemini to generate verification code for each claim — no hardcoded checks.
+
+    Results are also persisted to MemoryStore so the optimizer can learn from
+    claim verification failures across runs.
     """
     mitigation = _load_json(os.path.join(OUTPUT_DIR, "mitigation_results.json"))
     baseline = _load_json(os.path.join(OUTPUT_DIR, "baseline_results.json"))
@@ -219,7 +222,47 @@ def verify_paper_claims() -> dict:
     out_path = os.path.join(OUTPUT_DIR, "verification_report.json")
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
+
+    # Persist verification results to memory for optimizer learning
+    _persist_verifications_to_memory(report)
+
     return report
+
+
+def _persist_verifications_to_memory(report: dict) -> None:
+    """Persist verification claim results into MemoryStore for self-evolution."""
+    try:
+        from agents.memory_agent import MemoryStore
+        from utils.schemas import VerificationRecord
+    except ImportError:
+        return
+
+    claims = report.get("claims", [])
+    if not claims:
+        return
+
+    try:
+        store = MemoryStore()
+        # Find the most recent run_id (or use 0 for standalone execution)
+        recent = store.recent_runs(limit=1)
+        run_id = recent[0]["id"] if recent else 0
+
+        for c in claims:
+            store.db.execute(
+                """INSERT INTO verifications (run_id, claim, verified, evidence, error)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    run_id,
+                    c.get("claim", ""),
+                    c.get("verified"),
+                    c.get("evidence", ""),
+                    c.get("error"),
+                ),
+            )
+        store.db.commit()
+        store.close()
+    except Exception:
+        pass
 
 
 def main():

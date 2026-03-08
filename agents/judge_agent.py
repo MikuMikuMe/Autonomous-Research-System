@@ -9,15 +9,11 @@ claims are supported by the data.
 import os
 import json
 
+from utils.schemas import BaselineResults, MitigationResults, JudgeResult, ModelMetrics
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 
-# Quality criteria (rule-based)
-REQUIRED_KEYS_DETECTION = [
-    "model", "accuracy", "f1_score", "auc",
-    "demographic_parity_diff", "equalized_odds_diff", "disparate_impact_ratio",
-    "eu_ai_act_spd_violation", "eu_ai_act_eod_violation",
-]
 MIN_DETECTION_MODELS = 2
 MIN_MITIGATION_STRATEGIES = 2
 REQUIRED_PAPER_SECTIONS = [
@@ -53,7 +49,7 @@ def _read_file(path, default=""):
 
 
 def _evaluate_detection_rules():
-    """Rule-based detection checks. Returns (passed, feedback_list)."""
+    """Rule-based detection checks. Uses BaselineResults schema validation."""
     result = {"passed": False, "feedback": []}
 
     json_path = os.path.join(OUTPUT_DIR, "baseline_results.json")
@@ -72,18 +68,19 @@ def _evaluate_detection_rules():
         result["feedback"].append("baseline_results.json is invalid or empty.")
         return result
 
-    metrics = data.get("baseline_metrics", [])
-    if len(metrics) < MIN_DETECTION_MODELS:
-        result["feedback"].append(
-            f"Expected at least {MIN_DETECTION_MODELS} baseline models, got {len(metrics)}."
-        )
+    schema_errors = BaselineResults.validate(data)
+    if schema_errors:
+        result["feedback"].extend(schema_errors)
         return result
 
+    metrics = data.get("baseline_metrics", [])
     for i, m in enumerate(metrics):
-        for key in REQUIRED_KEYS_DETECTION:
-            if key not in m:
-                result["feedback"].append(f"Model {i} ({m.get('model', '?')}) missing key: {key}")
-                return result
+        field_errors = ModelMetrics.validate(m)
+        if field_errors:
+            result["feedback"].extend(
+                f"Model {i} ({m.get('model', '?')}): {e}" for e in field_errors
+            )
+            return result
 
     violations = sum(
         1 for m in metrics
@@ -101,7 +98,7 @@ def _evaluate_detection_rules():
 
 
 def _evaluate_mitigation_rules():
-    """Rule-based mitigation checks."""
+    """Rule-based mitigation checks. Uses MitigationResults schema validation."""
     result = {"passed": False, "feedback": []}
 
     json_path = os.path.join(OUTPUT_DIR, "mitigation_results.json")
@@ -116,20 +113,13 @@ def _evaluate_mitigation_rules():
         result["feedback"].append("mitigation_results.json is invalid or empty.")
         return result
 
+    schema_errors = MitigationResults.validate(data)
+    if schema_errors:
+        result["feedback"].extend(schema_errors)
+        return result
+
     baseline = data.get("baseline_metrics", [])
     mitigation = data.get("mitigation_metrics", [])
-
-    if len(baseline) < MIN_DETECTION_MODELS:
-        result["feedback"].append(
-            f"Mitigation results should include baseline ({MIN_DETECTION_MODELS}+ models)."
-        )
-        return result
-
-    if len(mitigation) < MIN_MITIGATION_STRATEGIES:
-        result["feedback"].append(
-            f"Expected at least {MIN_MITIGATION_STRATEGIES} mitigation strategies, got {len(mitigation)}."
-        )
-        return result
 
     plot_path = os.path.join(OUTPUT_DIR, "mitigation_comparison.png")
     if not os.path.exists(plot_path):
@@ -144,10 +134,9 @@ def _evaluate_mitigation_rules():
 
 
 def _evaluate_auditing_rules():
-    """Rule-based auditing checks."""
+    """Rule-based auditing checks with structural guardrails."""
     result = {"passed": False, "feedback": []}
 
-    # Prefer paper.tex (LaTeX-only pipeline)
     draft_path = os.path.join(OUTPUT_DIR, "paper", "paper.tex")
     if not os.path.exists(draft_path):
         draft_path = os.path.join(OUTPUT_DIR, "paper_draft.md")
@@ -162,14 +151,43 @@ def _evaluate_auditing_rules():
         )
         return result
 
+    # Structural guardrails: catch defects that waste Gemini calls
+    abstract_count = draft.lower().count("\\begin{abstract}")
+    if abstract_count > 1:
+        result["feedback"].append(
+            f"Duplicated abstract ({abstract_count} occurrences). Paper is structurally broken."
+        )
+        return result
+
+    doc_begin_count = draft.count("\\begin{document}")
+    if doc_begin_count > 1:
+        result["feedback"].append(
+            f"Multiple \\begin{{document}} ({doc_begin_count}). Section files contain document wrappers."
+        )
+        return result
+
+    missing_sections = []
     for section in REQUIRED_PAPER_SECTIONS:
         if section.lower() not in draft.lower():
-            result["feedback"].append(f"Missing section: {section}")
-            return result
+            missing_sections.append(section)
+    if missing_sections:
+        result["feedback"].append(f"Missing sections: {', '.join(missing_sections)}")
+        return result
 
-    if "Model & Acc" not in draft and "\\\\begin{table" not in draft and "| Model" not in draft:
+    if "\\begin{table" not in draft and "Model & Acc" not in draft and "| Model" not in draft:
         result["feedback"].append(
             "Paper should include detection/mitigation results tables."
+        )
+        return result
+
+    # Check for truncation: paper should have content after the last required section
+    last_section_pos = max(
+        draft.lower().rfind(s.lower()) for s in REQUIRED_PAPER_SECTIONS
+    )
+    remaining_after_last = len(draft) - last_section_pos if last_section_pos > 0 else 0
+    if remaining_after_last < 100:
+        result["feedback"].append(
+            f"Paper appears truncated: only {remaining_after_last} chars after last required section."
         )
         return result
 
@@ -335,49 +353,58 @@ Respond in JSON only:
 # ====================================================================
 
 
-def evaluate_detection():
+def _to_judge_result(d: dict) -> JudgeResult:
+    """Convert internal dict to JudgeResult dataclass."""
+    return JudgeResult(
+        passed=d["passed"],
+        feedback=d.get("feedback", []),
+        retry_hint=d.get("retry_hint"),
+        actionable_feedback=d.get("actionable_feedback"),
+    )
+
+
+def evaluate_detection() -> JudgeResult:
     """Evaluate Detection Agent outputs. Rule-based + optional Gemini."""
     rules = _evaluate_detection_rules()
     if not rules["passed"]:
-        return {"passed": False, "feedback": rules["feedback"], "retry_hint": "detection"}
+        return JudgeResult(passed=False, feedback=rules["feedback"], retry_hint="detection")
 
-    # Optional Gemini semantic check
     data = _load_json(os.path.join(OUTPUT_DIR, "baseline_results.json"))
     gemini_result = _gemini_evaluate_detection(data) if data else None
     if gemini_result and not gemini_result.get("passed", True):
         rules["feedback"].append(f"[Gemini] {gemini_result.get('reasoning', 'Quality concern')}")
         if gemini_result.get("suggestions"):
             rules["feedback"].extend(f"  - {s}" for s in gemini_result["suggestions"])
-        return {"passed": False, "feedback": rules["feedback"], "retry_hint": "detection:try_different_seed"}
+        return JudgeResult(passed=False, feedback=rules["feedback"], retry_hint="detection:try_different_seed")
     elif gemini_result and gemini_result.get("reasoning"):
         rules["feedback"].append(f"[Gemini] {gemini_result['reasoning']}")
 
-    return {"passed": True, "feedback": rules["feedback"], "retry_hint": None}
+    return JudgeResult(passed=True, feedback=rules["feedback"])
 
 
-def evaluate_mitigation():
+def evaluate_mitigation() -> JudgeResult:
     """Evaluate Mitigation Agent outputs. Rule-based + optional Gemini."""
     rules = _evaluate_mitigation_rules()
     if not rules["passed"]:
-        return {"passed": False, "feedback": rules["feedback"], "retry_hint": "mitigation"}
+        return JudgeResult(passed=False, feedback=rules["feedback"], retry_hint="mitigation")
 
     baseline = _load_json(os.path.join(OUTPUT_DIR, "baseline_results.json"))
     mitigation = _load_json(os.path.join(OUTPUT_DIR, "mitigation_results.json"))
     gemini_result = _gemini_evaluate_mitigation(baseline or {}, mitigation or {})
     if gemini_result and not gemini_result.get("passed", True):
         rules["feedback"].append(f"[Gemini] {gemini_result.get('reasoning', 'Quality concern')}")
-        return {"passed": False, "feedback": rules["feedback"], "retry_hint": "mitigation"}
+        return JudgeResult(passed=False, feedback=rules["feedback"], retry_hint="mitigation")
     elif gemini_result and gemini_result.get("reasoning"):
         rules["feedback"].append(f"[Gemini] {gemini_result['reasoning']}")
 
-    return {"passed": True, "feedback": rules["feedback"], "retry_hint": None}
+    return JudgeResult(passed=True, feedback=rules["feedback"])
 
 
-def evaluate_auditing():
+def evaluate_auditing() -> JudgeResult:
     """Evaluate Auditing Agent outputs. Rule-based + optional Gemini."""
     rules = _evaluate_auditing_rules()
     if not rules["passed"]:
-        return {"passed": False, "feedback": rules["feedback"], "retry_hint": "auditing"}
+        return JudgeResult(passed=False, feedback=rules["feedback"], retry_hint="auditing")
 
     tex_path = os.path.join(OUTPUT_DIR, "paper", "paper.tex")
     draft = _read_file(tex_path) or _read_file(os.path.join(OUTPUT_DIR, "paper_draft.md"))
@@ -390,24 +417,21 @@ def evaluate_auditing():
         suggestions = gemini_result.get("suggestions") or []
         if suggestions:
             rules["feedback"].extend(f"  - {s}" for s in suggestions)
-        # Always invoke revision when Gemini fails — semantic issues are fixable (Observe → Optimize)
         actionable = reasoning
         if suggestions:
             actionable += "\n\nSuggestions:\n" + "\n".join(f"- {s}" for s in suggestions)
-        return {
-            "passed": False,
-            "feedback": rules["feedback"],
-            "retry_hint": "revise_claims",
-            "actionable_feedback": actionable,
-        }
+        return JudgeResult(
+            passed=False, feedback=rules["feedback"],
+            retry_hint="revise_claims", actionable_feedback=actionable,
+        )
     elif gemini_result and gemini_result.get("reasoning"):
         rules["feedback"].append(f"[Gemini] {gemini_result['reasoning']}")
 
-    return {"passed": True, "feedback": rules["feedback"], "retry_hint": None}
+    return JudgeResult(passed=True, feedback=rules["feedback"])
 
 
-def evaluate(agent_name: str):
-    """Evaluate a specific agent's output."""
+def evaluate(agent_name: str) -> JudgeResult:
+    """Evaluate a specific agent's output. Returns a JudgeResult dataclass."""
     evaluators = {
         "detection": evaluate_detection,
         "mitigation": evaluate_mitigation,
@@ -415,11 +439,11 @@ def evaluate(agent_name: str):
     }
     fn = evaluators.get(agent_name)
     if not fn:
-        return {"passed": False, "feedback": [f"Unknown agent: {agent_name}"], "retry_hint": None}
+        return JudgeResult(passed=False, feedback=[f"Unknown agent: {agent_name}"])
     return fn()
 
 
-def evaluate_all():
+def evaluate_all() -> dict[str, JudgeResult]:
     """Evaluate all agent outputs in pipeline order."""
     return {
         "detection": evaluate_detection(),
@@ -433,12 +457,12 @@ if __name__ == "__main__":
     agent = sys.argv[1] if len(sys.argv) > 1 else None
     if agent:
         r = evaluate(agent)
-        print(f"Agent: {agent} | Passed: {r['passed']}")
-        for msg in r["feedback"]:
+        print(f"Agent: {agent} | Passed: {r.passed}")
+        for msg in r.feedback:
             print(f"  - {msg}")
-        if r.get("retry_hint"):
-            print(f"  Retry hint: {r['retry_hint']}")
+        if r.retry_hint:
+            print(f"  Retry hint: {r.retry_hint}")
     else:
         for name, r in evaluate_all().items():
-            status = "PASS" if r["passed"] else "FAIL"
-            print(f"[{status}] {name}: {r['feedback'][0] if r['feedback'] else 'OK'}")
+            status = "PASS" if r.passed else "FAIL"
+            print(f"[{status}] {name}: {r.feedback[0] if r.feedback else 'OK'}")
