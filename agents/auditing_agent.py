@@ -372,8 +372,8 @@ def generate_background():
     \\centering
     \\caption{Bias mitigation stages and techniques.}
     \\label{tab:mitigation-stages}
-    \\small
-    \\begin{tabular}{lll}
+    \\footnotesize
+    \\begin{tabular}{@{}p{2.2cm} p{2.8cm} p{3.2cm}@{}}
     \\toprule
     Stage & Technique & Mechanism \\\\
     \\midrule
@@ -435,8 +435,8 @@ def generate_methodology(baseline_data, mitigation_data):
     \\centering
     \\caption{Model configurations.}
     \\label{tab:models}
-    \\small
-    \\begin{tabular}{ll}
+    \\footnotesize
+    \\begin{tabular}{@{}p{3.5cm} p{4.5cm}@{}}
     \\toprule
     Model & Configuration \\\\
     \\midrule
@@ -456,6 +456,11 @@ def generate_methodology(baseline_data, mitigation_data):
     """)
 
     # Append quantitative results if available
+    FIGURES_DIR = os.path.join(OUTPUT_DIR, "figures")
+
+    def _has_fig(name):
+        return os.path.exists(os.path.join(FIGURES_DIR, name))
+
     results_block = ""
     if baseline_data:
         bl = baseline_data.get("baseline_metrics", [])
@@ -467,6 +472,24 @@ def generate_methodology(baseline_data, mitigation_data):
                 "confirming that standard classifiers inherit representational "
                 "bias from the training data.\n"
             )
+            if _has_fig("fig_baseline_fairness.pdf"):
+                results_block += r"""
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{../figures/fig_baseline_fairness.pdf}
+\caption{Baseline bias detection: fairness metrics (|DPD|, |EOD|, DI) across Logistic Regression and Balanced Random Forest.}
+\label{fig:baseline-fairness}
+\end{figure*}
+"""
+            if _has_fig("fig_baseline_roc.pdf"):
+                results_block += r"""
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{../figures/fig_baseline_roc.pdf}
+\caption{ROC curves for baseline models.}
+\label{fig:baseline-roc}
+\end{figure}
+"""
 
     if mitigation_data:
         mit = mitigation_data.get("mitigation_metrics", [])
@@ -505,6 +528,15 @@ def generate_methodology(baseline_data, mitigation_data):
                     "institutions must weigh EU AI Act compliance against operational "
                     "costs (e.g., missed fraud, false alarms).\n\n"
                 )
+            if _has_fig("fig_mitigation_comparison.pdf"):
+                results_block += r"""
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.95\linewidth]{../figures/fig_mitigation_comparison.pdf}
+\caption{Mitigation comparative matrix: Accuracy, F1, |DPD|, |EOD|, and FPR across baseline and mitigated models.}
+\label{fig:mitigation}
+\end{figure*}
+"""
 
     # Validation methodology: how we verify research claims against our paper and data
     validation_block = ""
@@ -554,8 +586,8 @@ def generate_audit_framework():
     \\centering
     \\caption{Pre-deployment audit checks.}
     \\label{tab:predeploy}
-    \\small
-    \\begin{tabular}{ll}
+    \\footnotesize
+    \\begin{tabular}{@{}p{0.35\\linewidth}p{0.6\\linewidth}@{}}
     \\toprule
     Check & Description \\\\
     \\midrule

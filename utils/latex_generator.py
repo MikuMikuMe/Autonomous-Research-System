@@ -79,23 +79,22 @@ def _latex_metric_row(m):
 
 def _latex_metrics_table(metrics_list, caption, label):
     """Build a LaTeX table from a list of metric dicts (IEEE format).
-    Uses table* to span both columns and avoid collision in two-column layout."""
-    rows = "\n    ".join(_latex_metric_row(m) for m in metrics_list)
+    Uses table* to span both columns — follows docs/latex_exmaple.tex style."""
+    rows = "\n".join(_latex_metric_row(m) for m in metrics_list)
     return r"""
-\begin{table*}[!htbp]
+\begin{table*}[!t]
 \centering
 \caption{%s}
 \label{tab:%s}
-\small
-\begin{tabular}{lrrrrrrrrr}
+\footnotesize
+\begin{tabular}{@{}lrrrrrrrrr@{}}
 \toprule
 Model & Acc & F1 & AUC & FPR & DPD & EOD & DI & SPD Viol & EOD Viol \\
 \midrule
 %s
-\midrule
+\bottomrule
+\multicolumn{10}{l}{\scriptsize Thresholds: EU AI Act $|\mathrm{SPD}| \leq 0.1$, $|\mathrm{EOD}| \leq 0.05$, $\mathrm{DI} \geq 0.8$.}
 \end{tabular}
-\footnotesize
-Thresholds: EU AI Act $|\mathrm{SPD}| \leq 0.1$, $|\mathrm{EOD}| \leq 0.05$, $\mathrm{DI} \geq 0.8$.
 \end{table*}
 """ % (
         caption,
@@ -133,11 +132,11 @@ This work was supported by the QMind Research Team. We thank the anonymous revie
 \usepackage[T1]{fontenc}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\graphicspath{{../figures/}}
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{cite}
 \usepackage{placeins}
-\usepackage{float}
 
 \title{Bias Detection, Mitigation, and Auditing\\in Financial AI Systems}
 \author{
@@ -158,14 +157,13 @@ This work was supported by the QMind Research Team. We thank the anonymous revie
 
 
 def _fix_table_collisions(tex_content: str) -> str:
-    """Fix table placement to prevent overlap with text.
-    - Small tables (single-column): use [H] to force placement exactly where they appear.
-    - Wide tables: keep as table* (metrics tables already use table*).
-    Converting small tables to table* caused LaTeX to float them to page tops, overlapping text."""
-    # Single-column tables: use [H] (Here definitely) to prevent floating and overlap
+    """Normalise table placement specifiers to match docs/latex_exmaple.tex conventions.
+    - Single-column tables: [htbp]
+    - Wide tables (table*): [!t]
+    Never use [H] — it requires \\usepackage{float} and fights LaTeX's float algorithm."""
     tex_content = re.sub(
-        r"\\begin\{table\}\[htbp\]",
-        r"\\begin{table}[H]",
+        r"\\begin\{table\}\[H\]",
+        r"\\begin{table}[htbp]",
         tex_content,
     )
     return tex_content
@@ -259,7 +257,7 @@ def _generate_paper_tex_from_gemini(baseline_data, mitigation_data):
     system = """You are a LaTeX expert. Convert the given Markdown research paper to IEEE conference format.
 CRITICAL RULES:
 1. Use \\documentclass[conference]{IEEEtran}
-2. For ALL tables: use \\begin{table*}[!htbp] ... \\end{table*} (NOT \\begin{table}) so tables span full width and do NOT collide in two-column layout
+2. For wide metric tables: use \\begin{table*}[!t] with \\footnotesize, @{}lrrr...@{} columns, \\bottomrule then \\multicolumn footnote. For narrow tables (2-3 columns): use \\begin{table}[htbp] with \\footnotesize, @{}p{width} p{width}@{} columns. Never use [H] placement.
 3. Use \\FloatBarrier (placeins package) between consecutive tables/figures to prevent overlap
 4. Convert citations: (Author, Year) → \\cite{key}; use keys like pagano2023, ntoutsi2020, huang2025, euai2024, mlgulb2018
 5. Use \\cite{} for in-text references
@@ -475,7 +473,6 @@ def generate_paper_tex(baseline_data, mitigation_data):
 \usepackage{hyperref}
 \usepackage{cite}
 \usepackage{placeins}
-\usepackage{float}
 
 \title{Bias Detection, Mitigation, and Auditing\\in Financial AI Systems}
 \author{
