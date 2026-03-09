@@ -1,0 +1,24 @@
+You generate targeted academic search queries for a research paper on bias mitigation in financial AI.
+
+**Paper summary (abstract + section headings):**
+{paper_summary}
+
+**Experimental results:**
+{results_summary}
+
+**Identified gaps needing literature coverage:**
+{gaps_summary}
+
+Generate two types of queries:
+1. "research_queries" (max {max_research}): Full academic questions for deep literature search (arXiv, alphaXiv). Target claims in the paper that need citation support, specific metrics/thresholds from experiments that need literature comparison, and techniques used that should be compared to published results.
+2. "citation_queries" (max {max_citation}): Short keyword phrases (3-6 words) for Semantic Scholar search. Focus on finding citable papers for the bibliography.
+
+Rules:
+- Each query must be distinct and non-overlapping
+- Research queries should be specific enough to find relevant papers (include metric names, technique names, threshold values)
+- Citation queries should be broad enough to return results but specific to the paper's domain
+- Prioritize queries for claims that lack citation support over well-established facts
+- Include queries for any identified gaps
+
+Respond with JSON only, no markdown:
+{{"research_queries": ["query1", "query2", ...], "citation_queries": ["keywords1", "keywords2", ...]}}

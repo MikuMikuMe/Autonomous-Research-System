@@ -29,8 +29,17 @@ SOURCE_DOIS = [
     "10.37547/tajet/Volume07Issue05-19",
 ]
 
-# Semantic Scholar search queries for relevant literature
-SEMANTIC_QUERIES = [
+# Dynamic query generation — falls back to defaults if no pipeline context available
+def _get_citation_queries(max_queries: int = 8) -> list[str]:
+    try:
+        from utils.query_generator import generate_citation_queries
+        return generate_citation_queries(max_queries=max_queries)
+    except Exception as e:
+        print(f"  [Citation] Query generation failed ({e}), using defaults")
+        return DEFAULT_SEMANTIC_QUERIES[:max_queries]
+
+
+DEFAULT_SEMANTIC_QUERIES = [
     "bias mitigation financial AI credit scoring",
     "EU AI Act fairness thresholds algorithmic",
     "equalized odds demographic parity fraud detection",
@@ -290,7 +299,8 @@ def main():
 
     # 3. Semantic Scholar search
     print("  Searching Semantic Scholar...")
-    papers = search_semantic_scholar(SEMANTIC_QUERIES, limit_per_query=4)
+    queries = _get_citation_queries(max_queries=8)
+    papers = search_semantic_scholar(queries, limit_per_query=4)
     for p in papers:
         bib = _semantic_scholar_to_bibtex(p)
         m = re.search(r"@\w+\{([^,]+),", bib)

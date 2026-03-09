@@ -20,21 +20,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Queries derived from docs/RESEARCH_CHECKLIST.md and the three PDFs
-RESEARCH_QUERIES = [
-    "How do baseline ML models in fraud detection violate EU AI Act fairness thresholds (SPD, EOD, disparate impact)?",
-    "Equalized odds post-processing: Fairlearn ThresholdOptimizer and techniques to reduce EOD below 0.05 for EU AI Act compliance",
-    "ExponentiatedGradient EqualizedOdds in-processing: achieving |EOD| ≤ 0.05 in imbalanced financial datasets",
-    "SMOTE vs reweighting for fairness in credit scoring and fraud detection: recent comparative studies",
-    "Accuracy-fairness trade-off in bias mitigation: post-processing threshold adjustment",
-    "Adversarial debiasing effectiveness and accuracy penalty in financial AI",
-    "Bias types in AI: data, algorithmic, measurement, selection, temporal — systematic review",
-    "Fairness metrics conflicts: demographic parity vs equalized odds vs disparate impact trade-offs",
-    "EU AI Act Article 10 human-in-the-loop and high-risk AI requirements",
-    "Bias auditing frameworks: pre-deployment assessment, continuous monitoring, stakeholder participation",
-    "NYC Local Law 144 and EU AI Act risk-based conformity for automated decision systems",
-    "Model selection for fairness: XGBoost vs Random Forest vs Logistic Regression under class imbalance",
-]
+# Dynamic query generation from pipeline outputs (paper.tex, results, gaps)
+# Falls back to hardcoded defaults if no context is available yet.
+def _get_research_queries(max_queries: int = 10) -> list[str]:
+    try:
+        from utils.query_generator import generate_research_queries
+        return generate_research_queries(max_queries=max_queries)
+    except Exception as e:
+        print(f"  [Research] Query generation failed ({e}), using defaults")
+        from utils.query_generator import DEFAULT_RESEARCH_QUERIES
+        return DEFAULT_RESEARCH_QUERIES[:max_queries]
 
 
 def run_research(queries: list[str] | None = None, max_queries: int = 10, force_arxiv_semantic: bool = False) -> dict:
@@ -44,7 +39,8 @@ def run_research(queries: list[str] | None = None, max_queries: int = 10, force_
     When force_arxiv_semantic=True (or alphaXiv fails), ALWAYS uses arXiv + Semantic Scholar
     so we get structured papers_used for claim verification and citation.
     """
-    queries = queries or RESEARCH_QUERIES[:max_queries]
+    if queries is None:
+        queries = _get_research_queries(max_queries)
     findings = {
         "timestamp": datetime.now().isoformat(),
         "source_pdfs": [
