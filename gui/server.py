@@ -149,6 +149,20 @@ async def get_paper_pdf():
     return FileResponse(path, media_type="application/pdf", filename="paper.pdf")
 
 
+@app.get("/api/memory/journey")
+async def get_memory_journey():
+    try:
+        from agents.memory_agent import MemoryStore
+    except ImportError:
+        return JSONResponse({"error": "memory unavailable"}, status_code=503)
+
+    store = MemoryStore()
+    try:
+        return JSONResponse(store.journey_summary())
+    finally:
+        store.close()
+
+
 @app.get("/api/outputs/figures/{name}")
 async def get_figure(name: str):
     # Sanitize: only allow alphanumeric and underscore

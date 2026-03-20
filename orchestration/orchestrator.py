@@ -74,10 +74,35 @@ def _print_cli_event(event: PipelineEvent) -> None:
         print("─" * 70)
     elif event.type == EventType.AGENT_LOG and event.line:
         print(f"  {event.line}")
+    elif event.type == EventType.MEMORY_INSIGHT and event.line:
+        print(f"  {event.line}")
     elif event.type == EventType.JUDGE_RESULT:
         for line in event.feedback:
             prefix = "✓" if event.passed else "✗"
             print(f"  {prefix} {line}")
+    elif event.type == EventType.JOURNEY_SUMMARY:
+        summary = event.summary or {}
+        agent_summaries = summary.get("agents") or {}
+        print("\n" + "-" * 70)
+        print("  MEMORY SUMMARY")
+        print("-" * 70)
+        print(f"  Total runs remembered: {summary.get('total_runs', 0)}")
+        for agent_name, agent_summary in agent_summaries.items():
+            success_rate = float(agent_summary.get("success_rate", 0.0) or 0.0)
+            best_seed = agent_summary.get("best_seed")
+            best_seed_text = best_seed if best_seed is not None else "n/a"
+            print(
+                f"  {agent_name:<12} attempts={agent_summary.get('total_attempts', 0)} "
+                f"success={success_rate:.0%} best_seed={best_seed_text}"
+            )
+            for direction in (agent_summary.get("improvement_directions") or [])[:2]:
+                print(f"    -> {direction}")
+            recent_trials = agent_summary.get("recent_trials") or []
+            latest_failed = next((trial for trial in recent_trials if not trial.get("passed", False)), None)
+            if latest_failed:
+                error_type = latest_failed.get("error_type") or "Unknown"
+                feedback_preview = latest_failed.get("feedback_preview") or ""
+                print(f"    last_failure={error_type}: {feedback_preview}")
     elif event.type == EventType.PIPELINE_FINISHED:
         results: dict[str, dict[str, Any]] = event.results or {}
         print("\n" + "=" * 70)

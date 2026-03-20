@@ -11,6 +11,7 @@ const AGENTS = ["detection", "mitigation", "auditing"];
 
 let ws = null;
 let currentAgent = null;
+let latestJourneySummary = null;
 
 // --- DOM refs ---
 const statusBadge = document.getElementById("status-badge");
@@ -89,6 +90,7 @@ async function refreshOutputs() {
   const baseline = await fetchJson("/api/outputs/baseline");
   const mitigation = await fetchJson("/api/outputs/mitigation");
   const paper = await fetchText("/api/outputs/paper");
+  const memory = await fetchJson("/api/memory/journey");
 
   if (baseline && baseline.baseline_metrics) {
     renderMetricsTable("baseline-table", baseline.baseline_metrics);
@@ -103,6 +105,10 @@ async function refreshOutputs() {
     } else {
       paperEl.textContent = paper;
     }
+  }
+  if (memory && !memory.error) {
+    latestJourneySummary = memory;
+    renderMemorySummary(memory);
   }
 
   FIGURE_CONFIG.forEach(({ id, api }) => {
@@ -161,6 +167,62 @@ function addJudgeFeedback(agent, passed, feedback) {
     (feedback || []).map((f) => "<li>" + f + "</li>").join("") +
     "</ul>";
   el.appendChild(div);
+}
+
+function renderMemorySummary(summary) {
+  const el = document.getElementById("memory-summary");
+  if (!el) return;
+  if (!summary || !summary.total_runs) {
+    el.innerHTML = "<div class='rounded-lg border border-slate-700 bg-slate-950 p-4 text-slate-400'>No memory captured yet.</div>";
+    return;
+  }
+
+  const agentCards = Object.entries(summary.agents || {}).map(([agent, info]) => {
+    const recentTrials = (info.recent_trials || []).slice(0, 5).map((trial) => {
+      const statusClass = trial.passed ? "text-green-400" : "text-red-400";
+      const statusLabel = trial.passed ? "passed" : "failed";
+      const detail = [trial.error_type, trial.feedback_preview].filter(Boolean).join(" - ");
+      return "<li class='text-sm text-slate-300'><span class='" + statusClass + "'>" + statusLabel + "</span> seed " + trial.seed + " (attempt " + trial.attempt + ")" + (detail ? ": " + detail : "") + "</li>";
+    }).join("");
+
+    const failureReasons = Object.entries(info.failure_reasons || {}).map(([reason, count]) => {
+      return "<li class='text-sm text-slate-300'>" + reason + ": " + count + "</li>";
+    }).join("");
+
+    const directions = (info.improvement_directions || []).map((direction) => {
+      return "<li class='text-sm text-amber-300'>" + direction + "</li>";
+    }).join("");
+
+    return "<section class='rounded-lg border border-slate-700 bg-slate-950 p-4'>" +
+      "<div class='flex flex-wrap items-center justify-between gap-3 mb-3'>" +
+      "<h3 class='text-lg font-semibold text-cyan-400'>" + agent + "</h3>" +
+      "<div class='text-sm text-slate-400'>attempts: " + (info.total_attempts || 0) + " | success: " + Math.round((info.success_rate || 0) * 100) + "% | best seed: " + (info.best_seed ?? "n/a") + "</div>" +
+      "</div>" +
+      "<div class='grid grid-cols-1 lg:grid-cols-3 gap-4'>" +
+      "<div><h4 class='mb-2 text-sm font-medium text-slate-200'>Recent trials</h4><ul class='space-y-2'>" + (recentTrials || "<li class='text-sm text-slate-500'>No trials yet.</li>") + "</ul></div>" +
+      "<div><h4 class='mb-2 text-sm font-medium text-slate-200'>Failure reasons</h4><ul class='space-y-2'>" + (failureReasons || "<li class='text-sm text-slate-500'>No recurring failures.</li>") + "</ul></div>" +
+      "<div><h4 class='mb-2 text-sm font-medium text-slate-200'>Improvement directions</h4><ul class='space-y-2'>" + directions + "</ul></div>" +
+      "</div>" +
+      "</section>";
+  }).join("");
+
+  const unverifiedClaims = (summary.unverified_claims || []).map((claim) => {
+    const evidence = claim.evidence ? "<div class='text-xs text-slate-500 mt-1'>" + claim.evidence + "</div>" : "";
+    return "<li class='rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300'>" + claim.claim + evidence + "</li>";
+  }).join("");
+
+  el.innerHTML =
+    "<section class='rounded-lg border border-slate-700 bg-slate-950 p-4'>" +
+    "<div class='flex flex-wrap items-center justify-between gap-3'>" +
+    "<h2 class='text-xl font-semibold text-cyan-400'>Agent memory</h2>" +
+    "<div class='text-sm text-slate-400'>Total runs remembered: " + summary.total_runs + "</div>" +
+    "</div>" +
+    "</section>" +
+    agentCards +
+    "<section class='rounded-lg border border-slate-700 bg-slate-950 p-4'>" +
+    "<h3 class='mb-2 text-lg font-semibold text-cyan-400'>Unverified claims</h3>" +
+    "<ul class='space-y-2'>" + (unverifiedClaims || "<li class='text-sm text-slate-500'>No unresolved claims.</li>") + "</ul>" +
+    "</section>";
 }
 
 // --- Open paper on success ---
@@ -236,6 +298,13 @@ function handleEvent(event) {
       addJudgeFeedback(event.agent, event.passed, event.feedback);
       attemptInfo.textContent = "Attempt " + (event.attempt || 1) + " — " + (event.passed ? "Passed" : "Retrying...");
       break;
+    case "memory_insight":
+      appendLog(event.line || "");
+      break;
+    case "journey_summary":
+      latestJourneySummary = event.summary || null;
+      renderMemorySummary(latestJourneySummary);
+      break;
     case "outputs_updated":
       refreshOutputs();
       break;
@@ -276,6 +345,8 @@ runBtn.addEventListener("click", async () => {
   setStatus("Running", "bg-amber-600 text-white");
   liveLog.textContent = "";
   document.getElementById("judge-feedback").innerHTML = "";
+  latestJourneySummary = null;
+  renderMemorySummary(null);
   AGENTS.forEach((a) => {
     const el = document.getElementById("step-" + a);
     if (el) {

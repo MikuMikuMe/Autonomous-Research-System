@@ -9,7 +9,7 @@ Bridges to the existing GUI queue via connect_queue() for backward compat.
 from __future__ import annotations
 
 import queue
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
@@ -20,6 +20,8 @@ class EventType(Enum):
     AGENT_PROGRESS = "agent_progress"
     AGENT_FINISHED = "agent_finished"
     JUDGE_RESULT = "judge_result"
+    MEMORY_INSIGHT = "memory_insight"
+    JOURNEY_SUMMARY = "journey_summary"
     OUTPUTS_UPDATED = "outputs_updated"
     PIPELINE_FINISHED = "pipeline_finished"
 
@@ -37,11 +39,12 @@ class PipelineEvent:
     retry_hint: str | None = None
     attempt: int = 0
     all_passed: bool = False
-    results: dict | None = None
+    results: dict[str, object] | None = None
+    summary: dict[str, object] | None = None
 
-    def to_queue_dict(self) -> dict:
+    def to_queue_dict(self) -> dict[str, object]:
         """Convert to the plain-dict format the GUI expects."""
-        d: dict = {"type": self.type.value, "agent": self.agent}
+        d: dict[str, object] = {"type": self.type.value, "agent": self.agent}
         if self.type == EventType.AGENT_LOG:
             d["line"] = self.line
         elif self.type == EventType.AGENT_PROGRESS:
@@ -54,6 +57,10 @@ class PipelineEvent:
             d["feedback"] = self.feedback
             d["retry_hint"] = self.retry_hint
             d["attempt"] = self.attempt
+        elif self.type == EventType.MEMORY_INSIGHT:
+            d["line"] = self.line
+        elif self.type == EventType.JOURNEY_SUMMARY:
+            d["summary"] = self.summary or {}
         elif self.type == EventType.PIPELINE_FINISHED:
             d["all_passed"] = self.all_passed
             d["results"] = self.results or {}
@@ -65,9 +72,9 @@ class EventBus:
 
     def __init__(self) -> None:
         self._subscribers: list[Callable[[PipelineEvent], None]] = []
-        self._queue: queue.Queue | None = None
+        self._queue: queue.Queue[dict[str, object]] | None = None
 
-    def connect_queue(self, q: queue.Queue) -> None:
+    def connect_queue(self, q: queue.Queue[dict[str, object]]) -> None:
         """Bridge to existing GUI event_queue (backward compatible)."""
         self._queue = q
 
@@ -107,7 +114,13 @@ class EventBus:
     def outputs_updated(self, agent: str) -> None:
         self.emit(PipelineEvent(type=EventType.OUTPUTS_UPDATED, agent=agent))
 
-    def pipeline_finished(self, all_passed: bool, results: dict) -> None:
+    def memory_insight(self, agent: str, line: str) -> None:
+        self.emit(PipelineEvent(type=EventType.MEMORY_INSIGHT, agent=agent, line=line))
+
+    def journey_summary(self, summary: dict[str, object]) -> None:
+        self.emit(PipelineEvent(type=EventType.JOURNEY_SUMMARY, summary=summary))
+
+    def pipeline_finished(self, all_passed: bool, results: dict[str, object]) -> None:
         self.emit(PipelineEvent(
             type=EventType.PIPELINE_FINISHED, all_passed=all_passed, results=results,
         ))

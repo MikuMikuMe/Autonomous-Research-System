@@ -163,6 +163,22 @@ class PipelineRuntime:
             return ctx.mitigation.to_dict()
         return None
 
+    def _pick_seed(self, agent_name: str, attempt: int, memory, prior_attempts: list[AgentRunRecord]) -> tuple[int, str]:
+        attempted_seeds = [record.seed for record in prior_attempts if record.agent == agent_name]
+        if memory:
+            try:
+                default_seed = self.config.initial_seed if attempt == 1 else self.config.initial_seed + attempt
+                if hasattr(memory, "recommend_seed_for_agent"):
+                    return memory.recommend_seed_for_agent(agent_name, attempted_seeds, default_seed)
+                if attempt == 1:
+                    return memory.best_seed_for_agent(agent_name, self.config.initial_seed)
+            except Exception:
+                pass
+        if attempt > 1:
+            seed = self.config.initial_seed + attempt
+            return seed, f"retry with incremented seed {seed}"
+        return self.config.initial_seed, "default seed (no memory available)"
+
     def run(self) -> RuntimeSummary:
         ctx = PipelineContext(seed=self.config.initial_seed)
         memory = self._load_memory_store()
@@ -175,8 +191,9 @@ class PipelineRuntime:
             self.bus.started(agent_name)
 
             for attempt in range(1, self.config.max_retries + 1):
+                seed, seed_reason = self._pick_seed(agent_name, attempt, memory, agent_run_records)
+                self.bus.memory_insight(agent_name, f"[MEMORY] {seed_reason}")
                 if attempt > 1:
-                    seed = self.config.initial_seed + attempt
                     self.bus.log(agent_name, f"\n  [RETRY {attempt}/{self.config.max_retries}] seed={seed}")
 
                 agent_start = time.time()
@@ -323,6 +340,13 @@ class PipelineRuntime:
                     agent_runs=agent_run_records,
                     verifications=ctx.verifications,
                 )
+                memory.prune_old_runs(keep_recent=50)
+            except Exception:
+                traceback.print_exc()
+
+            try:
+                journey = memory.journey_summary()
+                self.bus.journey_summary(journey)
             except Exception:
                 traceback.print_exc()
 

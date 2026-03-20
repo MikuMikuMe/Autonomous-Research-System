@@ -122,6 +122,8 @@ class MemoryStore:
             ),
         )
         run_id = cur.lastrowid
+        if run_id is None:
+            raise RuntimeError("Failed to insert run record")
 
         for ar in record.agents:
             self.db.execute(
@@ -202,6 +204,8 @@ class MemoryStore:
             ),
         )
         run_id = cur.lastrowid
+        if run_id is None:
+            raise RuntimeError("Failed to insert run record")
 
         for ar in agent_runs:
             self.db.execute(
@@ -348,6 +352,240 @@ class MemoryStore:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def best_seed_for_agent(self, agent: str, default_seed: int = 42) -> tuple[int, str]:
+        passed_rows = self.db.execute(
+            """SELECT ar.seed, COUNT(*) as wins, MAX(r.id) as latest
+               FROM agent_runs ar JOIN runs r ON ar.run_id = r.id
+               WHERE ar.agent = ? AND ar.passed
+               GROUP BY ar.seed ORDER BY wins DESC, latest DESC LIMIT 5""",
+            (agent,),
+        ).fetchall()
+        if passed_rows:
+            best = passed_rows[0]
+            return (best["seed"], f"seed {best['seed']} passed {best['wins']}x for {agent}")
+
+        failed_seeds = self.db.execute(
+            """SELECT DISTINCT ar.seed FROM agent_runs ar
+               WHERE ar.agent = ? AND NOT ar.passed
+               ORDER BY ar.seed""",
+            (agent,),
+        ).fetchall()
+        failed_set = {r["seed"] for r in failed_seeds}
+
+        candidate = default_seed
+        for _ in range(20):
+            if candidate not in failed_set:
+                return (candidate, f"seed {candidate} untried for {agent} (avoiding {len(failed_set)} failed seeds)")
+            candidate += 1
+
+        return (default_seed, "no history - using default seed")
+
+    def recommend_seed_for_agent(self, agent: str, attempted_seeds: list[int], default_seed: int = 42) -> tuple[int, str]:
+        attempted = set(attempted_seeds)
+        passed_rows = self.db.execute(
+            """SELECT ar.seed, COUNT(*) as wins, MAX(r.id) as latest
+               FROM agent_runs ar JOIN runs r ON ar.run_id = r.id
+               WHERE ar.agent = ? AND ar.passed
+               GROUP BY ar.seed ORDER BY wins DESC, latest DESC""",
+            (agent,),
+        ).fetchall()
+        for row in passed_rows:
+            seed = row["seed"]
+            if seed not in attempted:
+                return (seed, f"using proven seed {seed} for {agent} ({row['wins']} prior wins)")
+
+        failed_rows = self.db.execute(
+            """SELECT DISTINCT ar.seed FROM agent_runs ar
+               WHERE ar.agent = ? AND NOT ar.passed""",
+            (agent,),
+        ).fetchall()
+        failed_set = {row["seed"] for row in failed_rows}
+
+        candidate = default_seed
+        for _ in range(50):
+            if candidate not in attempted and candidate not in failed_set:
+                return (
+                    candidate,
+                    f"using untried seed {candidate} for {agent} (avoiding {len(attempted)} attempted and {len(failed_set)} failed seeds)",
+                )
+            candidate += 1
+
+        if passed_rows:
+            best = passed_rows[0]
+            return (best["seed"], f"reusing best historical seed {best['seed']} for {agent} after exhausting untried options")
+
+        fallback = default_seed if default_seed not in attempted else max(attempted) + 1
+        return (fallback, f"fallback seed {fallback} for {agent} after exhausting memory-guided options")
+
+    def journey_summary(self) -> dict:
+        summary: dict = {"total_runs": 0, "agents": {}, "metric_trends": {}, "unverified_claims": []}
+
+        row = self.db.execute("SELECT COUNT(*) as cnt FROM runs").fetchone()
+        summary["total_runs"] = row["cnt"] if row else 0
+
+        if summary["total_runs"] == 0:
+            return summary
+
+        agents_in_db = self.db.execute("SELECT DISTINCT agent FROM agent_runs").fetchall()
+        for agent_row in agents_in_db:
+            agent = agent_row["agent"]
+            info: dict = {}
+
+            stats = self.db.execute(
+                """SELECT COUNT(*) as total,
+                          SUM(CASE WHEN passed THEN 1 ELSE 0 END) as wins,
+                          SUM(CASE WHEN NOT passed THEN 1 ELSE 0 END) as losses
+                   FROM agent_runs WHERE agent = ?""",
+                (agent,),
+            ).fetchone()
+            info["total_attempts"] = stats["total"]
+            info["successes"] = stats["wins"] or 0
+            info["failures"] = stats["losses"] or 0
+            info["success_rate"] = round(info["successes"] / info["total_attempts"], 3) if info["total_attempts"] else 0.0
+
+            best = self.db.execute(
+                """SELECT seed, COUNT(*) as wins FROM agent_runs
+                   WHERE agent = ? AND passed GROUP BY seed ORDER BY wins DESC LIMIT 1""",
+                (agent,),
+            ).fetchone()
+            info["best_seed"] = best["seed"] if best else None
+
+            trials = self.db.execute(
+                """SELECT ar.seed, ar.attempt, ar.passed, ar.error_type,
+                          ar.judge_feedback, r.timestamp
+                   FROM agent_runs ar JOIN runs r ON ar.run_id = r.id
+                   WHERE ar.agent = ?
+                   ORDER BY r.id DESC, ar.attempt DESC LIMIT 10""",
+                (agent,),
+            ).fetchall()
+            info["recent_trials"] = []
+            for t in trials:
+                fb = t["judge_feedback"]
+                try:
+                    fb_list = json.loads(fb) if isinstance(fb, str) and fb else []
+                except (json.JSONDecodeError, TypeError):
+                    fb_list = [fb] if fb else []
+                preview = "; ".join(str(f)[:80] for f in fb_list[:2]) if fb_list else ""
+                info["recent_trials"].append(
+                    {
+                        "seed": t["seed"],
+                        "attempt": t["attempt"],
+                        "passed": bool(t["passed"]),
+                        "error_type": t["error_type"],
+                        "feedback_preview": preview,
+                        "timestamp": t["timestamp"],
+                    }
+                )
+
+            fail_reasons = self.db.execute(
+                """SELECT error_type, COUNT(*) as cnt FROM agent_runs
+                   WHERE agent = ? AND NOT passed AND error_type IS NOT NULL
+                   GROUP BY error_type ORDER BY cnt DESC""",
+                (agent,),
+            ).fetchall()
+            info["failure_reasons"] = {r["error_type"]: r["cnt"] for r in fail_reasons}
+
+            directions: list[str] = []
+            if info["failures"] > 0 and info["success_rate"] < 0.5:
+                top_error = next(iter(info["failure_reasons"]), None)
+                if top_error:
+                    directions.append(f"Most common failure: {top_error} ({info['failure_reasons'][top_error]}x) - address this error type first")
+            if info["successes"] > 0 and info["best_seed"] is not None:
+                directions.append(f"Seed {info['best_seed']} has highest success rate - prefer it")
+            if info["total_attempts"] > 5 and info["success_rate"] < 0.3:
+                directions.append(f"Low success rate ({info['success_rate']:.0%}) - consider reviewing agent configuration or prompts")
+            if not directions:
+                if info["success_rate"] >= 0.8:
+                    directions.append("Agent is performing well - no changes needed")
+                else:
+                    directions.append("Insufficient data for actionable recommendations")
+            info["improvement_directions"] = directions
+
+            summary["agents"][agent] = info
+
+        for metric in ("best_eod", "best_dpd"):
+            trend = self.metric_trend(metric, limit=10)
+            if trend:
+                summary["metric_trends"][metric] = [
+                    {"timestamp": ts, "value": val}
+                    for ts, val in trend if val is not None
+                ]
+
+        unverified = self.unverified_claims(limit=5)
+        summary["unverified_claims"] = [
+            {"claim": str(c.get("claim", ""))[:120], "evidence": str(c.get("evidence", ""))[:120]}
+            for c in unverified
+        ]
+
+        return summary
+
+    def prune_old_runs(self, keep_recent: int = 50) -> int:
+        total = self.db.execute("SELECT COUNT(*) as cnt FROM runs").fetchone()["cnt"]
+        keep_ids: set[int] = set()
+        protected_ids: set[int] = set()
+        recent = self.db.execute("SELECT id FROM runs ORDER BY id DESC LIMIT ?", (keep_recent,)).fetchall()
+        keep_ids.update(r["id"] for r in recent)
+
+        for metric in ("best_eod", "best_dpd"):
+            best = self.db.execute(
+                f"SELECT id FROM runs WHERE {metric} IS NOT NULL ORDER BY ABS({metric}) ASC LIMIT 3"
+            ).fetchall()
+            protected_ids.update(r["id"] for r in best)
+
+        first = self.db.execute("SELECT id FROM runs ORDER BY id ASC LIMIT 1").fetchone()
+        if first:
+            keep_ids.add(first["id"])
+
+        keep_ids.update(protected_ids)
+
+        failed_runs = self.db.execute(
+            """SELECT r.id,
+                      GROUP_CONCAT(
+                          ar.agent || '|' || COALESCE(ar.error_type, '') || '|' || COALESCE(ar.error, '') || '|' || COALESCE(ar.judge_feedback, ''),
+                          '||'
+                      ) AS signature,
+                      SUM(CASE WHEN ar.passed THEN 1 ELSE 0 END) AS passed_count
+               FROM runs r
+               JOIN agent_runs ar ON ar.run_id = r.id
+               GROUP BY r.id
+               HAVING passed_count = 0
+               ORDER BY r.id DESC"""
+        ).fetchall()
+        seen_signatures: set[str] = set()
+        redundant_ids: set[int] = set()
+        for row in failed_runs:
+            signature = str(row["signature"] or "")
+            run_id = int(row["id"])
+            if not signature:
+                continue
+            if signature in seen_signatures and run_id not in protected_ids:
+                redundant_ids.add(run_id)
+            else:
+                seen_signatures.add(signature)
+
+        keep_ids.difference_update(redundant_ids)
+
+        if total <= keep_recent and not redundant_ids:
+            return 0
+
+        if not keep_ids:
+            return 0
+
+        placeholders = ",".join("?" * len(keep_ids))
+        ids_to_keep = list(keep_ids)
+
+        for table in ("agent_runs", "metrics", "verifications"):
+            self.db.execute(
+                f"DELETE FROM {table} WHERE run_id NOT IN ({placeholders})",
+                ids_to_keep,
+            )
+        deleted = self.db.execute(
+            f"DELETE FROM runs WHERE id NOT IN ({placeholders})",
+            ids_to_keep,
+        ).rowcount
+        self.db.commit()
+        return deleted
+
     # ================================================================
     # Legacy API wrappers (backward compat)
     # ================================================================
@@ -392,6 +630,8 @@ class MemoryStore:
             ),
         )
         run_id = cur.lastrowid
+        if run_id is None:
+            raise RuntimeError("Failed to insert legacy run record")
         for agent_name, r in results.items():
             self.db.execute(
                 """INSERT INTO agent_runs (run_id, agent, seed, attempt, passed,
