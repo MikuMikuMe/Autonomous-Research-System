@@ -1,0 +1,9 @@
+# Handle line endings automatically for files detected as text 
+# and leave binary files (images, etc.) alone.
+* text=auto
+
+# Explicitly declare files that should always use LF (e.g., shell scripts)
+*.sh text eol=lf
+
+# Explicitly declare files that should always use CRLF (if needed)
+*.bat text eol=crlf

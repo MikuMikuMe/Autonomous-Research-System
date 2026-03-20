@@ -1,0 +1,21 @@
+INFO:     Started server process [17244]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+Bias Audit Pipeline ¡ª GUI
+Open http://127.0.0.1:8000 in your browser
+----------------------------------------
+INFO:     127.0.0.1:3988 - "GET /api/memory/journey HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7453 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7453 - "GET /static/app.js HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7457 - "WebSocket /ws" [accepted]
+INFO:     127.0.0.1:7453 - "GET /api/outputs/baseline HTTP/1.1" 200 OK
+INFO:     connection open
+INFO:     127.0.0.1:7453 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:7453 - "GET /api/outputs/mitigation HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7453 - "GET /api/outputs/paper HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7453 - "GET /api/memory/journey HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7453 - "GET /api/outputs/figures/fig_baseline_fairness?t=1774038075585 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7458 - "GET /api/outputs/figures/fig_baseline_roc?t=1774038075585 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:7459 - "GET /api/outputs/figures/fig_mitigation_comparison?t=1774038075585 HTTP/1.1" 200 OK
+INFO:     connection closed
