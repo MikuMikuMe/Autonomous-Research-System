@@ -1,0 +1,157 @@
+{
+  "schema_version": "runtime_session_contract.v1",
+  "session_id": "sess_auditing_revision_needed_20260310T123000Z",
+  "pipeline_seed": 42,
+  "status": "needs_revision",
+  "current_stage": "auditing",
+  "started_at": "2026-03-10T12:30:00Z",
+  "updated_at": "2026-03-10T12:37:02Z",
+  "retry_metadata": {
+    "agent": "auditing",
+    "attempt": 1,
+    "max_attempts": 3,
+    "seed": 42,
+    "retry_hint": "revise_claims",
+    "next_retry_seed": null,
+    "status": "awaiting_revision"
+  },
+  "judge_results": {
+    "auditing": {
+      "passed": false,
+      "feedback": [
+        "Claims overstate fairness compliance.",
+        "Discussion section must reflect threshold-adjustment dependency."
+      ],
+      "retry_hint": "revise_claims",
+      "actionable_feedback": "Align the discussion with the structure review findings."
+    }
+  },
+  "agent_runs": [
+    {
+      "agent": "auditing",
+      "seed": 42,
+      "attempt": 1,
+      "passed": false,
+      "duration_seconds": 58.2,
+      "error": null,
+      "error_type": null,
+      "metrics_snapshot": {
+        "paper_length_chars": 2841,
+        "required_sections_present": true
+      },
+      "judge_feedback": [
+        "Claims overstate fairness compliance.",
+        "Discussion section must reflect threshold-adjustment dependency."
+      ],
+      "retry_hint": "revise_claims"
+    }
+  ],
+  "artifact_manifest": {
+    "schema_version": "runtime_artifact_manifest.v1",
+    "session_id": "sess_auditing_revision_needed_20260310T123000Z",
+    "generated_at": "2026-03-10T12:37:02Z",
+    "legacy_exports": {
+      "baseline_results_json": "outputs/baseline_results.json",
+      "mitigation_results_json": "outputs/mitigation_results.json",
+      "structure_review_json": "outputs/structure_review.json",
+      "paper_draft_md": "outputs/paper_draft.md",
+      "paper_tex": "outputs/paper/paper.tex",
+      "paper_pdf": "outputs/paper/paper.pdf"
+    },
+    "exported_paper_artifacts": {
+      "draft_markdown": "outputs/paper_draft.md",
+      "latex_source": "outputs/paper/paper.tex",
+      "compiled_pdf": "outputs/paper/paper.pdf",
+      "structure_review": "outputs/structure_review.json"
+    },
+    "artifact_index": {
+      "baseline_results": {
+        "path": "outputs/baseline_results.json",
+        "producer": "detection",
+        "kind": "json",
+        "media_type": "application/json",
+        "required": true,
+        "legacy_output": true
+      },
+      "mitigation_results": {
+        "path": "outputs/mitigation_results.json",
+        "producer": "mitigation",
+        "kind": "json",
+        "media_type": "application/json",
+        "required": true,
+        "legacy_output": true
+      },
+      "structure_review": {
+        "path": "outputs/structure_review.json",
+        "producer": "auditing",
+        "kind": "json",
+        "media_type": "application/json",
+        "required": true,
+        "legacy_output": true
+      },
+      "paper_draft": {
+        "path": "outputs/paper_draft.md",
+        "producer": "auditing",
+        "kind": "markdown",
+        "media_type": "text/markdown",
+        "required": true,
+        "legacy_output": true
+      },
+      "paper_tex": {
+        "path": "outputs/paper/paper.tex",
+        "producer": "auditing",
+        "kind": "latex",
+        "media_type": "application/x-tex",
+        "required": true,
+        "legacy_output": true
+      },
+      "paper_pdf": {
+        "path": "outputs/paper/paper.pdf",
+        "producer": "auditing",
+        "kind": "pdf",
+        "media_type": "application/pdf",
+        "required": true,
+        "legacy_output": true
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "agent_started",
+      "agent": "auditing"
+    },
+    {
+      "type": "agent_log",
+      "agent": "auditing",
+      "line": "Drafting paper revision from latest outputs."
+    },
+    {
+      "type": "agent_finished",
+      "agent": "auditing",
+      "returncode": 0
+    },
+    {
+      "type": "judge_result",
+      "agent": "auditing",
+      "passed": false,
+      "feedback": [
+        "Claims overstate fairness compliance.",
+        "Discussion section must reflect threshold-adjustment dependency."
+      ],
+      "retry_hint": "revise_claims",
+      "attempt": 1
+    },
+    {
+      "type": "outputs_updated",
+      "agent": "auditing"
+    },
+    {
+      "type": "pipeline_finished",
+      "agent": "",
+      "all_passed": false,
+      "results": {
+        "auditing": "revision_needed"
+      }
+    }
+  ]
+}

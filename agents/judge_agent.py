@@ -8,6 +8,7 @@ claims are supported by the data.
 
 import os
 import json
+import re
 
 from utils.schemas import BaselineResults, MitigationResults, JudgeResult, ModelMetrics
 
@@ -186,10 +187,34 @@ def _evaluate_auditing_rules():
     )
     remaining_after_last = len(draft) - last_section_pos if last_section_pos > 0 else 0
     if remaining_after_last < 100:
+        last_section_name = "unknown"
+        for s in REQUIRED_PAPER_SECTIONS:
+            if draft.lower().rfind(s.lower()) == last_section_pos:
+                last_section_name = s
+                break
         result["feedback"].append(
-            f"Paper appears truncated: only {remaining_after_last} chars after last required section."
+            f"Paper appears truncated: only {remaining_after_last} chars after last required section "
+            f"('{last_section_name}' at position {last_section_pos}/{len(draft)}). "
+            f"This usually means Gemini output was cut off during paper generation. "
+            f"The auditing agent should be re-run — the LLM truncation guardrail will now retry automatically."
         )
         return result
+
+    # Check for dangling incomplete content near the end
+    end_doc_pos = draft.rfind("\\end{document}")
+    check_region = draft[:end_doc_pos].rstrip() if end_doc_pos > 0 else draft.rstrip()
+    if len(check_region) > 100:
+        dangling = re.search(
+            r"\s+(?:the|a|an|in|on|at|by|for|with|of|to|from|and|or|but|particularly)\s*$",
+            check_region[-200:],
+            re.IGNORECASE,
+        )
+        if dangling:
+            result["feedback"].append(
+                f"Paper content ends with incomplete sentence: '...{check_region[-60:].strip()}'. "
+                f"Re-run auditing agent — the truncation guardrail should fix this."
+            )
+            return result
 
     result["passed"] = True
     msg = f"Auditing OK: draft {len(draft)} chars, all sections present."

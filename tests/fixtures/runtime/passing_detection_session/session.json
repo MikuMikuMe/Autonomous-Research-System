@@ -1,0 +1,106 @@
+{
+  "schema_version": "runtime_session_contract.v1",
+  "session_id": "sess_detection_pass_20260310T120000Z",
+  "pipeline_seed": 42,
+  "status": "running",
+  "current_stage": "mitigation",
+  "started_at": "2026-03-10T12:00:00Z",
+  "updated_at": "2026-03-10T12:02:14Z",
+  "retry_metadata": {
+    "agent": "detection",
+    "attempt": 1,
+    "max_attempts": 3,
+    "seed": 42,
+    "retry_hint": null,
+    "next_retry_seed": null,
+    "status": "passed"
+  },
+  "judge_results": {
+    "detection": {
+      "passed": true,
+      "feedback": [
+        "Detection OK: 2 models, 2 with violations."
+      ]
+    }
+  },
+  "agent_runs": [
+    {
+      "agent": "detection",
+      "seed": 42,
+      "attempt": 1,
+      "passed": true,
+      "duration_seconds": 91.4,
+      "error": null,
+      "error_type": null,
+      "metrics_snapshot": {
+        "violating_models": 2,
+        "best_auc": 0.9821
+      },
+      "judge_feedback": [
+        "Detection OK: 2 models, 2 with violations."
+      ],
+      "retry_hint": null
+    }
+  ],
+  "artifact_manifest": {
+    "schema_version": "runtime_artifact_manifest.v1",
+    "session_id": "sess_detection_pass_20260310T120000Z",
+    "generated_at": "2026-03-10T12:02:14Z",
+    "legacy_exports": {
+      "baseline_results_json": "outputs/baseline_results.json"
+    },
+    "exported_paper_artifacts": {},
+    "artifact_index": {
+      "baseline_results": {
+        "path": "outputs/baseline_results.json",
+        "producer": "detection",
+        "kind": "json",
+        "media_type": "application/json",
+        "required": true,
+        "legacy_output": true
+      }
+    }
+  },
+  "events": [
+    {
+      "type": "agent_started",
+      "agent": "detection"
+    },
+    {
+      "type": "agent_log",
+      "agent": "detection",
+      "line": "Loading dataset split."
+    },
+    {
+      "type": "agent_progress",
+      "agent": "detection",
+      "progress": 0.25,
+      "label": "load_dataset"
+    },
+    {
+      "type": "agent_progress",
+      "agent": "detection",
+      "progress": 0.75,
+      "label": "train_models"
+    },
+    {
+      "type": "agent_finished",
+      "agent": "detection",
+      "returncode": 0
+    },
+    {
+      "type": "judge_result",
+      "agent": "detection",
+      "passed": true,
+      "feedback": [
+        "Detection OK: 2 models, 2 with violations."
+      ],
+      "retry_hint": null,
+      "attempt": 1
+    },
+    {
+      "type": "outputs_updated",
+      "agent": "detection"
+    }
+  ]
+}

@@ -62,6 +62,42 @@ def _write_section(name, content):
     print(f"  Section saved: {path}")
 
 
+def _section_looks_truncated(content: str, section_name: str, min_chars: int = 200) -> bool:
+    """Check if a section's content appears truncated before writing.
+    Returns True if truncation is suspected."""
+    stripped = content.strip()
+    if len(stripped) < min_chars:
+        print(f"  [GUARDRAIL] Section '{section_name}' is suspiciously short ({len(stripped)} chars)", flush=True)
+        return True
+
+    clean = re.sub(r"\\end\{[^}]+\}\s*$", "", stripped).rstrip()
+    clean = re.sub(r"\\(bottomrule|toprule|midrule)\s*$", "", clean).rstrip()
+    if not clean:
+        return False
+
+    last_char = clean[-1]
+    safe_endings = frozenset(".!?}\")\u201d")
+    if last_char in safe_endings:
+        return False
+
+    dangling = re.compile(
+        r"(?:the|a|an|this|that|in|on|at|by|for|with|of|to|from|and|or|but|particularly|far exceeding)\s*$",
+        re.IGNORECASE,
+    )
+    if dangling.search(clean):
+        print(f"  [GUARDRAIL] Section '{section_name}' ends with dangling word: '...{clean[-50:]}'", flush=True)
+        return True
+
+    return False
+
+
+def _write_section_with_validation(name, content):
+    """Write section file after validating content is not truncated."""
+    if _section_looks_truncated(content, name):
+        print(f"  [GUARDRAIL] WARNING: Section '{name}' may be truncated. Writing anyway (assembly will catch).", flush=True)
+    _write_section(name, content)
+
+
 def _latex_metric_row(m):
     """Format a single metrics dict as a LaTeX table row."""
     spd = "Yes" if m.get("eu_ai_act_spd_violation") else "No"
@@ -157,7 +193,13 @@ Merged passage:"""
 
     result = generate(prompt, max_output_tokens=3000)
     if result and len(result.strip()) > 100:
-        return result.strip()
+        text = result.strip()
+        if not text[-1] in ".!?\u201d\")" :
+            trimmed = _truncate_combined_at_sentence(text, len(text))
+            if len(trimmed) > 100:
+                print(f"  [GUARDRAIL] Gemini merge output trimmed to sentence boundary for '{topic}'", flush=True)
+                return trimmed
+        return text
     return passages[0]["passage"]
 
 
@@ -260,7 +302,7 @@ def generate_introduction(mitigation_data=None, baseline_data=None):
     details mitigation experiments; Section~6 proposes the audit framework;
     and Section~7 discusses implications and limitations.
     """)
-    _write_section("01_introduction", content)
+    _write_section_with_validation("01_introduction", content)
     return content
 
 
@@ -391,7 +433,7 @@ def generate_background():
     accuracy loss.  Adversarial debiasing can reduce EOD by up to 58\\% but
     incurs a larger accuracy penalty (3--5\\%).
     """)
-    _write_section("02_background", content)
+    _write_section_with_validation("02_background", content)
     return content
 
 
@@ -556,7 +598,7 @@ def generate_methodology(baseline_data, mitigation_data):
         """)
 
     full = dataset_block + results_block + validation_block
-    _write_section("03_methodology_and_results", full)
+    _write_section_with_validation("03_methodology_and_results", full)
     return full
 
 
@@ -632,7 +674,7 @@ def generate_audit_framework():
     attributes, over-focus on one-shot technical audits, and involve limited
     participation of affected communities \\cite{murikah2024,funda2025}.
     """)
-    _write_section("04_audit_framework", content)
+    _write_section_with_validation("04_audit_framework", content)
     return content
 
 
@@ -743,7 +785,7 @@ def generate_discussion(baseline_data=None, mitigation_data=None):
       financial institution would strengthen its practical applicability.
     \\end{{itemize}}
     """)
-    _write_section("05_discussion", content)
+    _write_section_with_validation("05_discussion", content)
     return content
 
 
@@ -781,7 +823,7 @@ def generate_references():
 \bibliographystyle{IEEEtran}
 \bibliography{references}
 """
-    _write_section("06_references", content)
+    _write_section_with_validation("06_references", content)
     return content
 
 
@@ -834,6 +876,35 @@ def _validate_paper_structure(full_tex):
             issues.append(f"Duplicate content block detected: \"{snippet}...\"")
             break
         seen.add(chunk)
+
+    last_section_pos = max(
+        (full_tex.lower().rfind(s.lower()) for s in REQUIRED_SECTION_KEYWORDS),
+        default=-1,
+    )
+    if last_section_pos > 0:
+        remaining = len(full_tex) - last_section_pos
+        if remaining < 100:
+            issues.append(
+                f"Paper appears truncated: only {remaining} chars after last required section. "
+                f"The section starting near char {last_section_pos} has almost no body content."
+            )
+
+    end_doc_pos = full_tex.rfind("\\end{document}")
+    if end_doc_pos < 0:
+        issues.append("Missing \\end{document} — paper likely truncated before completion")
+    elif end_doc_pos > 0:
+        content_before_end = full_tex[:end_doc_pos].rstrip()
+        if len(content_before_end) > 200:
+            tail = content_before_end[-200:]
+            dangling = re.search(
+                r"(?:the|a|an|in|on|at|by|for|with|of|to|from|and|or|but|particularly|far exceeding)\s*$",
+                tail,
+                re.IGNORECASE,
+            )
+            if dangling:
+                issues.append(
+                    f"Content before \\end{{document}} ends with dangling word: '...{tail[-60:].strip()}'"
+                )
 
     return len(issues) == 0, issues
 
@@ -933,6 +1004,23 @@ def _auto_repair_paper(tex, issues):
         if first_end >= 0 and last_end > first_end:
             tex = tex[:first_end] + tex[first_end + len("\\end{document}"):last_end] + tex[last_end:]
             print("    Auto-repaired: removed premature \\end{document}")
+
+    if "truncated" in issue_text or "dangling word" in issue_text:
+        end_doc = tex.rfind("\\end{document}")
+        if end_doc > 0:
+            before_end = tex[:end_doc].rstrip()
+            dangling_match = re.search(
+                r"\s+(?:the|a|an|in|on|at|by|for|with|of|to|from|and|or|but|particularly|far exceeding)\s*$",
+                before_end,
+                re.IGNORECASE,
+            )
+            if dangling_match:
+                tex = before_end[:dangling_match.start()] + ".\n\n" + tex[end_doc:]
+                print("    Auto-repaired: trimmed dangling word before \\end{document}")
+
+        if "missing \\end{document}" in issue_text:
+            tex = tex.rstrip() + "\n\n\\end{document}\n"
+            print("    Auto-repaired: appended missing \\end{document}")
 
     return tex
 
