@@ -81,6 +81,31 @@ CREATE TABLE IF NOT EXISTS verifications (
     evidence    TEXT,
     error       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS idea_sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT    NOT NULL UNIQUE,
+    timestamp       TEXT    NOT NULL,
+    title           TEXT,
+    domain          TEXT,
+    keywords        TEXT,
+    hypotheses      TEXT,
+    proposed_methods TEXT,
+    verdict         TEXT,
+    novelty_score   REAL,
+    flaws_count     INTEGER DEFAULT 0,
+    iterations_done INTEGER DEFAULT 0,
+    final_report    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS idea_insights (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT    NOT NULL,
+    domain       TEXT    NOT NULL,
+    insight      TEXT    NOT NULL,
+    insight_type TEXT,
+    timestamp    TEXT    NOT NULL
+);
 """
 
 
@@ -88,7 +113,9 @@ class MemoryStore:
     """SQLite-backed memory for the Bias Audit Pipeline self-evolution loop."""
 
     def __init__(self, db_path: str = DB_PATH) -> None:
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        db_dir = os.path.dirname(db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
         self.db = sqlite3.connect(db_path)
         self.db.row_factory = sqlite3.Row
         self._ensure_tables()
@@ -585,6 +612,183 @@ class MemoryStore:
         ).rowcount
         self.db.commit()
         return deleted
+
+    # ================================================================
+    # Knowledge compaction — consolidate redundant insights
+    # ================================================================
+
+    def compact_knowledge(self) -> dict:
+        """Consolidate redundant knowledge entries and remove obsolete data.
+
+        Performs three compaction passes:
+        1. Deduplicate idea_insights with identical content within the same domain.
+        2. Remove obsolete verification records where the same claim has a newer,
+           contradicting result (keeps the most recent per claim).
+        3. Collapse redundant agent_run feedback (identical error+feedback on the
+           same agent/seed) into the most recent entry only.
+
+        Returns a summary dict with counts of removed rows per table.
+        """
+        removed: dict[str, int] = {"idea_insights": 0, "verifications": 0, "agent_runs": 0}
+
+        # --- Pass 1: Deduplicate idea insights ---
+        # Keep only the most recent insight per (domain, insight) pair
+        dup_insights = self.db.execute(
+            """SELECT domain, insight, COUNT(*) as cnt, MAX(id) as keep_id
+               FROM idea_insights
+               GROUP BY domain, insight
+               HAVING cnt > 1"""
+        ).fetchall()
+        for row in dup_insights:
+            self.db.execute(
+                "DELETE FROM idea_insights WHERE domain = ? AND insight = ? AND id != ?",
+                (row["domain"], row["insight"], row["keep_id"]),
+            )
+            removed["idea_insights"] += row["cnt"] - 1
+
+        # --- Pass 2: Deduplicate verification records ---
+        # For each unique claim, keep only the most recent verification
+        dup_verifications = self.db.execute(
+            """SELECT claim, COUNT(*) as cnt, MAX(id) as keep_id
+               FROM verifications
+               GROUP BY claim
+               HAVING cnt > 1"""
+        ).fetchall()
+        for row in dup_verifications:
+            self.db.execute(
+                "DELETE FROM verifications WHERE claim = ? AND id != ?",
+                (row["claim"], row["keep_id"]),
+            )
+            removed["verifications"] += row["cnt"] - 1
+
+        # --- Pass 3: Collapse redundant agent_run feedback ---
+        # If the same agent+seed+error_type+judge_feedback appears multiple
+        # times across runs, keep only the most recent entry per group.
+        dup_agent_runs = self.db.execute(
+            """SELECT agent, seed, error_type,
+                      COALESCE(judge_feedback, '') as fb,
+                      COUNT(*) as cnt, MAX(id) as keep_id
+               FROM agent_runs
+               WHERE NOT passed
+               GROUP BY agent, seed, error_type, fb
+               HAVING cnt > 2"""
+        ).fetchall()
+        for row in dup_agent_runs:
+            # Keep the two most recent to preserve trend data
+            keep_ids = self.db.execute(
+                """SELECT id FROM agent_runs
+                   WHERE agent = ? AND seed = ?
+                     AND COALESCE(error_type, '') = COALESCE(?, '')
+                     AND COALESCE(judge_feedback, '') = ?
+                     AND NOT passed
+                   ORDER BY id DESC LIMIT 2""",
+                (row["agent"], row["seed"], row["error_type"], row["fb"]),
+            ).fetchall()
+            keep_set = {r["id"] for r in keep_ids}
+            deleted = self.db.execute(
+                """DELETE FROM agent_runs
+                   WHERE agent = ? AND seed = ?
+                     AND COALESCE(error_type, '') = COALESCE(?, '')
+                     AND COALESCE(judge_feedback, '') = ?
+                     AND NOT passed
+                     AND id NOT IN ({})""".format(",".join("?" * len(keep_set))),
+                (row["agent"], row["seed"], row["error_type"], row["fb"], *keep_set),
+            ).rowcount
+            removed["agent_runs"] += deleted
+
+        self.db.commit()
+        return removed
+
+    # ================================================================
+    # Idea verification session API
+    # ================================================================
+
+    def store_idea_session(
+        self,
+        session_id: str,
+        title: str,
+        domain: str,
+        hypotheses: list[str],
+        methods: list[str],
+        keywords: list[str],
+        final_report: dict,
+        iterations: list[dict],
+    ) -> None:
+        """Persist an idea verification session and extract insights into memory."""
+        verdict = final_report.get("verdict", "")
+        novelty_score = final_report.get("novelty_score")
+        flaws = final_report.get("flaws", [])
+        now = datetime.now().isoformat()
+
+        self.db.execute(
+            """INSERT OR REPLACE INTO idea_sessions
+               (session_id, timestamp, title, domain, keywords, hypotheses,
+                proposed_methods, verdict, novelty_score, flaws_count,
+                iterations_done, final_report)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, now, title, domain,
+                json.dumps(keywords),
+                json.dumps(hypotheses),
+                json.dumps(methods),
+                verdict,
+                novelty_score,
+                len(flaws),
+                len(iterations),
+                json.dumps(final_report),
+            ),
+        )
+
+        # Extract and store insights for future sessions in the same domain
+        for flaw in flaws[:5]:
+            if flaw and flaw.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'pitfall', ?)""",
+                    (session_id, domain, flaw.strip()[:500], now),
+                )
+
+        for claim in final_report.get("supported_claims", [])[:3]:
+            if claim and claim.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'supported_claim', ?)""",
+                    (session_id, domain, claim.strip()[:500], now),
+                )
+
+        for method in methods[:3]:
+            if method and method.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'effective_method', ?)""",
+                    (session_id, domain, method.strip()[:500], now),
+                )
+
+        self.db.commit()
+
+    def get_idea_insights(self, domain: str, limit: int = 10) -> list[str]:
+        """Return previously accumulated insights for a given research domain."""
+        rows = self.db.execute(
+            """SELECT insight FROM idea_insights
+               WHERE domain = ? OR domain LIKE ?
+               ORDER BY id DESC LIMIT ?""",
+            (domain, f"{domain}%", limit),
+        ).fetchall()
+        return [r["insight"] for r in rows]
+
+    def get_idea_sessions(self, limit: int = 20) -> list[dict]:
+        """Return a summary of recent idea verification sessions."""
+        rows = self.db.execute(
+            """SELECT session_id, timestamp, title, domain, verdict,
+                      novelty_score, flaws_count, iterations_done
+               FROM idea_sessions
+               ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ================================================================
     # Legacy API wrappers (backward compat)

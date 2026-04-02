@@ -1,0 +1,59 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+\begin{document}
+
+\title{Bias Detection and Mitigation in Credit Card Fraud Detection Models}
+
+\author{\IEEEauthorblockN{QMind Research Team}
+\IEEEauthorblockA{Queen's University, Kingston, Ontario, Canada}}
+
+\maketitle
+
+\begin{abstract}
+This paper presents a systematic approach to detecting and mitigating bias in machine learning models used for credit card fraud detection, with evaluation against EU AI Act fairness thresholds.
+\end{abstract}
+
+\section{Introduction}
+Machine learning models used in financial decision-making can exhibit demographic bias.
+
+\section{Background}
+Algorithmic fairness metrics include Demographic Parity Difference, Equalized Odds Difference, and Disparate Impact Ratio.
+
+\section{Use Case}
+Credit card fraud detection using the MLG-ULB dataset.
+
+\section{Detection Results}
+Baseline models were evaluated using fairness metrics.
+
+\begin{table}[h]
+\centering
+\caption{Baseline Model Fairness Metrics}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Model & Acc & DPD & EOD & DI \\
+\hline
+Logistic Regression & 0.961 & 0.125 & 0.062 & 0.765 \\
+Balanced Random Forest & 0.959 & 0.089 & 0.043 & 0.812 \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Audit Framework}
+We apply SMOTE pre-processing and threshold adjustment as mitigation strategies.
+
+\section{Mitigation Experiments}
+XGBoost with SMOTE and threshold adjustment were evaluated.
+
+\section{Discussion}
+Mitigation introduces a modest accuracy trade-off while improving fairness. Threshold adjustment is needed for full EOD compliance.
+
+\section{References}
+\begin{thebibliography}{1}
+\bibitem{fairlearn} Fairlearn documentation, Microsoft, 2024.
+\bibitem{euaiact} EU AI Act, European Commission, 2024.
+\end{thebibliography}
+
+\end{document}

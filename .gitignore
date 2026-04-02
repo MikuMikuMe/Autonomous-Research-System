@@ -7,6 +7,8 @@ outputs/
 kaggle.json
 .env
 *.pdf
+# Allow test fixture files that live under outputs/ or match *.pdf
+!tests/fixtures/**
 # Copy mcp.json.example to mcp.json and add your alphaXiv token (do not commit)
 .cursor/mcp.json
 .cursor

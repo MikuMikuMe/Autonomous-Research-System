@@ -65,6 +65,9 @@
       <button data-tab="memory" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
         Memory
       </button>
+      <button data-tab="idea" class="tab-btn px-4 py-2 rounded-t-lg bg-slate-700 text-slate-400 hover:text-slate-200">
+        Idea Verifier
+      </button>
     </div>
 
     <!-- Tab content -->
@@ -120,6 +123,101 @@
 
     <div id="tab-memory" class="tab-content hidden">
       <div id="memory-summary" class="space-y-4"></div>
+    </div>
+
+    <!-- Idea Verifier tab -->
+    <div id="tab-idea" class="tab-content hidden">
+      <!-- Submission form -->
+      <div class="rounded-lg border border-slate-700 bg-slate-950 p-6 mb-6">
+        <h2 class="text-lg font-semibold text-cyan-400 mb-4">Submit Research Idea</h2>
+        <p class="text-sm text-slate-400 mb-4">
+          Describe your research idea below. The system will automatically retrieve
+          similar papers, cross-validate your claims, flag flaws, and accumulate
+          insights across sessions.
+        </p>
+        <form id="idea-form" class="space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Research Idea Description *</label>
+            <textarea
+              id="idea-text"
+              rows="8"
+              placeholder="Describe your research idea: hypotheses, proposed methods, expected outcomes..."
+              class="w-full rounded-lg bg-slate-800 border border-slate-600 text-slate-200 p-3 text-sm focus:outline-none focus:border-cyan-500 resize-vertical"
+            ></textarea>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Supporting Images (optional)</label>
+            <input
+              id="idea-files"
+              type="file"
+              multiple
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              class="block text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-cyan-700 file:text-white hover:file:bg-cyan-600 cursor-pointer"
+            />
+            <p class="text-xs text-slate-500 mt-1">PNG, JPG, GIF, WebP — diagrams, figures, methodology sketches</p>
+          </div>
+          <div class="flex items-center gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Max Iterations</label>
+              <select id="idea-iterations" class="rounded-lg bg-slate-800 border border-slate-600 text-slate-200 px-3 py-2 text-sm">
+                <option value="1">1 (fast)</option>
+                <option value="2">2</option>
+                <option value="3" selected>3 (recommended)</option>
+                <option value="5">5 (thorough)</option>
+              </select>
+            </div>
+            <div class="flex-1"></div>
+            <button
+              id="idea-submit-btn"
+              type="submit"
+              class="px-6 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition"
+            >
+              Verify Idea
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Progress / live log -->
+      <div id="idea-progress-section" class="hidden mb-6">
+        <div class="rounded-lg border border-slate-700 bg-slate-950 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-semibold text-cyan-400">Verification in Progress</h3>
+            <span id="idea-status-badge" class="px-2 py-1 rounded-full text-xs font-medium bg-amber-600 text-white">Running</span>
+          </div>
+          <div id="idea-progress-bar-container" class="mb-3">
+            <div class="flex justify-between text-xs text-slate-400 mb-1">
+              <span id="idea-progress-label">Starting...</span>
+              <span id="idea-progress-pct">0%</span>
+            </div>
+            <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+              <div id="idea-progress-bar" class="h-full bg-cyan-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+          </div>
+          <pre id="idea-live-log" class="bg-slate-900 p-3 rounded text-xs font-mono h-48 overflow-auto"></pre>
+        </div>
+      </div>
+
+      <!-- Iteration summaries -->
+      <div id="idea-iterations-section" class="hidden mb-6">
+        <h3 class="font-semibold text-cyan-400 mb-3">Iteration Results</h3>
+        <div id="idea-iteration-cards" class="space-y-3"></div>
+      </div>
+
+      <!-- Final report -->
+      <div id="idea-report-section" class="hidden mb-6">
+        <h3 class="font-semibold text-cyan-400 mb-3">Verification Report</h3>
+        <div id="idea-report-content" class="space-y-4"></div>
+      </div>
+
+      <!-- Past sessions -->
+      <div class="rounded-lg border border-slate-700 bg-slate-950 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="font-semibold text-cyan-400">Past Sessions</h3>
+          <button id="idea-sessions-refresh" class="text-xs text-slate-400 hover:text-slate-200 underline">Refresh</button>
+        </div>
+        <div id="idea-sessions-list" class="text-slate-400 text-sm">Loading...</div>
+      </div>
     </div>
   </div>
 
