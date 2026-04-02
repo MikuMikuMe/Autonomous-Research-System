@@ -173,8 +173,6 @@ def extract_idea(
                 if parsed:
                     structured.update(parsed)
                     structured["session_id"] = sid
-                    structured["timestamp"] = structured["timestamp"]
-                    structured["raw_text"] = text
                     structured["image_paths"] = image_paths or []
                     structured["extraction_method"] = (
                         "llm_multimodal" if image_paths else "llm"

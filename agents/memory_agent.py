@@ -685,9 +685,9 @@ class MemoryStore:
         """Return previously accumulated insights for a given research domain."""
         rows = self.db.execute(
             """SELECT insight FROM idea_insights
-               WHERE domain LIKE ?
+               WHERE domain = ? OR domain LIKE ?
                ORDER BY id DESC LIMIT ?""",
-            (f"%{domain}%", limit),
+            (domain, f"{domain}%", limit),
         ).fetchall()
         return [r["insight"] for r in rows]
 

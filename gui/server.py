@@ -269,16 +269,20 @@ async def submit_idea(
 
     session_id = f"idea_{_dt.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
 
-    # Save uploaded files
+    # Save uploaded files with randomized names to prevent path traversal
+    import uuid as _uuid
     session_upload_dir = IDEA_UPLOADS_DIR / session_id
     session_upload_dir.mkdir(parents=True, exist_ok=True)
     saved_paths: list[str] = []
     for upload in files:
         if not upload.filename:
             continue
-        safe_name = "".join(c for c in upload.filename if c.isalnum() or c in "._-")
-        if not safe_name:
+        # Preserve only the extension from the original filename; use a random stem
+        original_ext = Path(upload.filename).suffix.lower()
+        allowed_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        if original_ext not in allowed_exts:
             continue
+        safe_name = f"{_uuid.uuid4().hex}{original_ext}"
         dest = session_upload_dir / safe_name
         content = await upload.read()
         with open(dest, "wb") as fh:
@@ -304,12 +308,19 @@ async def submit_idea(
 @app.get("/api/idea/results/{session_id}")
 async def get_idea_results(session_id: str):
     """Return the verification results for a completed session."""
-    # Sanitize
+    # Strict sanitization: only alphanumeric, underscore, hyphen (no path separators)
     safe = "".join(c for c in session_id if c.isalnum() or c in "_-")
-    if safe != session_id:
+    if safe != session_id or not safe:
         return JSONResponse({"error": "invalid session_id"}, status_code=400)
-    results_path = OUTPUTS_DIR / "idea_verification" / safe / "verification_results.json"
-    if not results_path.exists():
+    # Enumerate server-side directory to decouple the path from user-controlled input
+    idea_verification_dir = (OUTPUTS_DIR / "idea_verification").resolve()
+    results_path = None
+    if idea_verification_dir.is_dir():
+        for candidate_dir in idea_verification_dir.iterdir():
+            if candidate_dir.is_dir() and candidate_dir.name == safe:
+                results_path = candidate_dir / "verification_results.json"
+                break
+    if results_path is None or not results_path.exists():
         running = _idea_threads.get(session_id)
         status = "running" if (running and running.is_alive()) else "pending"
         return JSONResponse({"status": status})

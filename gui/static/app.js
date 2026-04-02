@@ -276,6 +276,16 @@ function connect() {
 }
 
 function handleEvent(event) {
+  // Dispatch to registered handlers in order
+  for (const handler of _eventHandlers) {
+    if (handler(event) === false) return;  // handler returns false to stop propagation
+  }
+}
+
+// Registry of event handlers; first registered = first called.
+const _eventHandlers = [];
+
+function _handlePipelineEvent(event) {
   switch (event.type) {
     case "agent_started":
       currentAgent = event.agent;
@@ -366,6 +376,9 @@ runBtn.addEventListener("click", async () => {
 });
 
 // --- Init ---
+// Register event handlers before connecting so all messages are handled
+_eventHandlers.push(_handlePipelineEvent);
+// Idea handler is registered later after its function definition
 connect();
 refreshOutputs();
 
@@ -476,17 +489,11 @@ async function loadIdeaSessions() {
   }).join("");
 }
 
-// Extend WebSocket event handler with idea events
-const _origHandleEvent = handleEvent;
-handleEvent = function (event) {
-  if (event.type && event.type.startsWith("idea_")) {
-    handleIdeaEvent(event);
-  } else {
-    _origHandleEvent(event);
-  }
-};
+// Register handlers using the handler array (no monkey-patching)
+_eventHandlers.push(_handleIdeaEvent);
 
-function handleIdeaEvent(event) {
+function _handleIdeaEvent(event) {
+  if (!event.type || !event.type.startsWith("idea_")) return;  // not an idea event
   switch (event.type) {
     case "idea_log":
       if (event.session_id === activeIdeaSession) {

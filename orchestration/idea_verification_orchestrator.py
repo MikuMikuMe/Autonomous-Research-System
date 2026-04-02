@@ -34,6 +34,7 @@ MAX_ITERATIONS = 3
 MAX_PAPERS_PER_QUERY = 5
 MAX_CLAIMS_PER_ITERATION = 5
 MAX_QUERIES_PER_ITERATION = 8
+MAX_COMBINED_TEXT_LENGTH = 8000
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +222,17 @@ def _synthesize_final_report(
     supported_claims = list(dict.fromkeys(supported_claims))[:5]
     contradicted_claims = list(dict.fromkeys(contradicted_claims))[:5]
 
-    # Novelty score: 0 = fully known, 1 = completely novel
+    # Novelty score: fraction of total claims that were neither contradicted nor merely
+    # reproduced by existing literature. High score = most claims are new.
+    # Claims that are simply "supported" still reduce novelty somewhat (already known),
+    # but contradicted claims reduce it more severely.
     total = len(supported_claims) + len(contradicted_claims)
-    novelty_score = round(1.0 - (len(contradicted_claims) / total), 3) if total > 0 else 0.5
+    if total == 0:
+        novelty_score = 0.5  # Unknown — insufficient literature coverage
+    else:
+        contradiction_penalty = len(contradicted_claims) / total
+        support_penalty = (len(supported_claims) / total) * 0.3  # partial penalty: already known
+        novelty_score = round(max(0.0, 1.0 - contradiction_penalty - support_penalty), 3)
 
     # Verdict
     if len(all_flaws) > 2:
@@ -449,7 +458,7 @@ def run_idea_verification(
             if text_result:
                 all_text_this_iter.append(text_result)
 
-        combined_text = "\n\n".join(all_text_this_iter)[:8000]
+        combined_text = "\n\n".join(all_text_this_iter)[:MAX_COMBINED_TEXT_LENGTH]
         seen_titles: dict[str, dict] = {}
         for p in all_papers_this_iter:
             t = p.get("title", "")
