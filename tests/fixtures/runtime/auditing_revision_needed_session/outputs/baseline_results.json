@@ -1,0 +1,32 @@
+{
+  "baseline_metrics": [
+    {
+      "model": "Logistic Regression",
+      "accuracy": 0.9610,
+      "f1_score": 0.8234,
+      "auc": 0.9821,
+      "false_positive_rate": 0.000123,
+      "demographic_parity_diff": 0.1250,
+      "equalized_odds_diff": 0.0620,
+      "disparate_impact_ratio": 0.7654,
+      "positive_rate_group_0": 0.0234,
+      "positive_rate_group_1": 0.1456,
+      "eu_ai_act_spd_violation": true,
+      "eu_ai_act_eod_violation": true
+    },
+    {
+      "model": "Balanced Random Forest",
+      "accuracy": 0.9587,
+      "f1_score": 0.8156,
+      "auc": 0.9805,
+      "false_positive_rate": 0.000156,
+      "demographic_parity_diff": 0.0890,
+      "equalized_odds_diff": 0.0432,
+      "disparate_impact_ratio": 0.8123,
+      "positive_rate_group_0": 0.0287,
+      "positive_rate_group_1": 0.1128,
+      "eu_ai_act_spd_violation": false,
+      "eu_ai_act_eod_violation": false
+    }
+  ]
+}

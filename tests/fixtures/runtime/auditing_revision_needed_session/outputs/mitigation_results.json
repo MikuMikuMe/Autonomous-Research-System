@@ -1,0 +1,72 @@
+{
+  "baseline_metrics": [
+    {
+      "model": "Logistic Regression",
+      "accuracy": 0.9610,
+      "f1_score": 0.8234,
+      "auc": 0.9821,
+      "false_positive_rate": 0.000123,
+      "demographic_parity_diff": 0.1250,
+      "equalized_odds_diff": 0.0620,
+      "disparate_impact_ratio": 0.7654,
+      "positive_rate_group_0": 0.0234,
+      "positive_rate_group_1": 0.1456,
+      "eu_ai_act_spd_violation": true,
+      "eu_ai_act_eod_violation": true
+    },
+    {
+      "model": "Balanced Random Forest",
+      "accuracy": 0.9587,
+      "f1_score": 0.8156,
+      "auc": 0.9805,
+      "false_positive_rate": 0.000156,
+      "demographic_parity_diff": 0.0890,
+      "equalized_odds_diff": 0.0432,
+      "disparate_impact_ratio": 0.8123,
+      "positive_rate_group_0": 0.0287,
+      "positive_rate_group_1": 0.1128,
+      "eu_ai_act_spd_violation": false,
+      "eu_ai_act_eod_violation": false
+    }
+  ],
+  "mitigation_metrics": [
+    {
+      "model": "XGBoost with SMOTE",
+      "accuracy": 0.9542,
+      "f1_score": 0.8098,
+      "auc": 0.9734,
+      "false_positive_rate": 0.000189,
+      "demographic_parity_diff": 0.0456,
+      "equalized_odds_diff": 0.0234,
+      "disparate_impact_ratio": 0.8876,
+      "positive_rate_group_0": 0.0312,
+      "positive_rate_group_1": 0.0956,
+      "eu_ai_act_spd_violation": false,
+      "eu_ai_act_eod_violation": false
+    },
+    {
+      "model": "Random Forest with Threshold Adjustment",
+      "accuracy": 0.9501,
+      "f1_score": 0.8034,
+      "auc": 0.9687,
+      "false_positive_rate": 0.000234,
+      "demographic_parity_diff": 0.0289,
+      "equalized_odds_diff": 0.0145,
+      "disparate_impact_ratio": 0.9102,
+      "positive_rate_group_0": 0.0298,
+      "positive_rate_group_1": 0.0876,
+      "eu_ai_act_spd_violation": false,
+      "eu_ai_act_eod_violation": false
+    }
+  ],
+  "asymmetric_cost_analysis": {
+    "best_baseline_model": "Balanced Random Forest",
+    "best_mitigated_model": "Random Forest with Threshold Adjustment",
+    "accuracy_delta": -0.0086,
+    "fpr_delta": 0.000078,
+    "auc_delta": -0.0118,
+    "dpd_improvement": 0.0601,
+    "eod_improvement": 0.0287,
+    "trade_off_summary": "Threshold adjustment reduces |EOD| by 0.029 with minimal accuracy loss (0.86%)."
+  }
+}
