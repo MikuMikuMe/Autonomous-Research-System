@@ -8,7 +8,7 @@ import queue
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +16,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent.parent
 OUTPUTS_DIR = SCRIPT_DIR / "outputs"
 FIGURES_DIR = OUTPUTS_DIR / "figures"
 PAPER_DIR = OUTPUTS_DIR / "paper"
+IDEA_UPLOADS_DIR = OUTPUTS_DIR / "idea_uploads"
+IDEA_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Bias Audit Pipeline")
 
@@ -24,10 +26,15 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Pipeline state
-_event_queue = queue.Queue()
+_event_queue: queue.Queue = queue.Queue()
 _pipeline_thread = None
-_ws_clients = []
+_ws_clients: list = []
 _consumer_task = None
+
+# Idea verification state (separate thread + queue, shared WS broadcast)
+_idea_queue: queue.Queue = queue.Queue()
+_idea_threads: dict[str, threading.Thread] = {}
+_idea_consumer_task = None
 
 
 def _run_pipeline():
@@ -68,6 +75,21 @@ async def _event_consumer():
             break
 
 
+async def _idea_consumer():
+    """Consume idea verification events and broadcast to all WebSocket clients."""
+    while True:
+        try:
+            event = await asyncio.to_thread(_idea_queue.get)
+            msg = json.dumps(event)
+            for ws in list(_ws_clients):
+                try:
+                    await ws.send_text(msg)
+                except Exception:
+                    pass
+        except Exception:
+            break
+
+
 def _ensure_consumer_running():
     """Start consumer task if pipeline is running and consumer not active."""
     global _consumer_task
@@ -76,11 +98,20 @@ def _ensure_consumer_running():
     _consumer_task = asyncio.create_task(_event_consumer())
 
 
+def _ensure_idea_consumer_running():
+    """Start the idea verification event consumer if not already running."""
+    global _idea_consumer_task
+    if _idea_consumer_task and not _idea_consumer_task.done():
+        return
+    _idea_consumer_task = asyncio.create_task(_idea_consumer())
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     global _pipeline_thread, _consumer_task
     await websocket.accept()
     _ws_clients.append(websocket)
+    _ensure_idea_consumer_running()  # Keep idea consumer alive as long as clients are connected
     try:
         while True:
             data = await websocket.receive_text()
@@ -180,6 +211,124 @@ async def get_figure(name: str):
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+# ---------------------------------------------------------------------------
+# Idea Verification API
+# ---------------------------------------------------------------------------
+
+
+def _run_idea_verification(
+    session_id: str,
+    text: str,
+    image_paths: list[str],
+    max_iterations: int,
+) -> None:
+    """Thread target: run idea verification and push events to _idea_queue."""
+    try:
+        from orchestration.idea_verification_orchestrator import run_idea_verification
+        run_idea_verification(
+            text,
+            image_paths=image_paths,
+            max_iterations=max_iterations,
+            bus=_idea_queue,
+            session_id=session_id,
+        )
+    except Exception as e:
+        try:
+            _idea_queue.put({
+                "type": "idea_log",
+                "session_id": session_id,
+                "line": f"[ERROR] Verification failed: {e}",
+            })
+            _idea_queue.put({
+                "type": "idea_finished",
+                "session_id": session_id,
+                "final_report": {"verdict": "error", "flaws": [str(e)], "recommendations": []},
+                "iterations_completed": 0,
+            })
+        except Exception:
+            pass
+
+
+@app.post("/api/idea/verify")
+async def submit_idea(
+    text: str = Form(""),
+    max_iterations: int = Form(3),
+    files: list[UploadFile] = File(default=[]),
+):
+    """
+    Submit a research idea (text + optional images) for iterative verification.
+    Returns the session_id immediately; progress streams via WebSocket idea_* events.
+    """
+    import random
+    from datetime import datetime as _dt
+
+    if not text.strip():
+        return JSONResponse({"error": "text is required"}, status_code=400)
+
+    session_id = f"idea_{_dt.now().strftime('%Y%m%d_%H%M%S')}_{random.randint(1000, 9999)}"
+
+    # Save uploaded files
+    session_upload_dir = IDEA_UPLOADS_DIR / session_id
+    session_upload_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[str] = []
+    for upload in files:
+        if not upload.filename:
+            continue
+        safe_name = "".join(c for c in upload.filename if c.isalnum() or c in "._-")
+        if not safe_name:
+            continue
+        dest = session_upload_dir / safe_name
+        content = await upload.read()
+        with open(dest, "wb") as fh:
+            fh.write(content)
+        saved_paths.append(str(dest))
+
+    # Clamp iterations
+    max_iterations = max(1, min(max_iterations, 5))
+
+    # Start verification thread
+    thread = threading.Thread(
+        target=_run_idea_verification,
+        args=(session_id, text.strip(), saved_paths, max_iterations),
+        daemon=True,
+    )
+    thread.start()
+    _idea_threads[session_id] = thread
+    _ensure_idea_consumer_running()
+
+    return JSONResponse({"status": "started", "session_id": session_id})
+
+
+@app.get("/api/idea/results/{session_id}")
+async def get_idea_results(session_id: str):
+    """Return the verification results for a completed session."""
+    # Sanitize
+    safe = "".join(c for c in session_id if c.isalnum() or c in "_-")
+    if safe != session_id:
+        return JSONResponse({"error": "invalid session_id"}, status_code=400)
+    results_path = OUTPUTS_DIR / "idea_verification" / safe / "verification_results.json"
+    if not results_path.exists():
+        running = _idea_threads.get(session_id)
+        status = "running" if (running and running.is_alive()) else "pending"
+        return JSONResponse({"status": status})
+    with open(results_path, encoding="utf-8") as fh:
+        return JSONResponse(json.load(fh))
+
+
+@app.get("/api/idea/sessions")
+async def list_idea_sessions():
+    """Return a list of past idea verification sessions from memory."""
+    try:
+        from agents.memory_agent import MemoryStore
+    except ImportError:
+        return JSONResponse({"error": "memory unavailable"}, status_code=503)
+    store = MemoryStore()
+    try:
+        return JSONResponse(store.get_idea_sessions(limit=20))
+    finally:
+        store.close()
 
 
 if __name__ == "__main__":

@@ -368,3 +368,240 @@ runBtn.addEventListener("click", async () => {
 // --- Init ---
 connect();
 refreshOutputs();
+
+// ============================================================
+// Idea Verifier UI
+// ============================================================
+
+let activeIdeaSession = null;
+
+function ideaLog(line) {
+  const el = document.getElementById("idea-live-log");
+  if (el) {
+    el.textContent += line + "\n";
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function setIdeaProgress(pct, label) {
+  const bar = document.getElementById("idea-progress-bar");
+  const pctEl = document.getElementById("idea-progress-pct");
+  const labelEl = document.getElementById("idea-progress-label");
+  if (bar) bar.style.width = Math.min(100, Math.max(0, pct * 100)) + "%";
+  if (pctEl) pctEl.textContent = Math.round(pct * 100) + "%";
+  if (labelEl) labelEl.textContent = label || "Processing...";
+}
+
+function showIdeaSection(id) {
+  const el = document.getElementById(id);
+  if (el) el.classList.remove("hidden");
+}
+
+function renderIdeaIteration(iterData) {
+  const container = document.getElementById("idea-iteration-cards");
+  if (!container) return;
+  showIdeaSection("idea-iterations-section");
+  const flaws = (iterData.flaws || []).map((f) => `<li class="text-red-300 text-sm">${f}</li>`).join("");
+  const card = document.createElement("div");
+  card.className = "rounded-lg border border-slate-700 bg-slate-900 p-4";
+  card.innerHTML =
+    `<div class="flex items-center justify-between mb-2">` +
+    `<span class="font-medium text-slate-200">Iteration ${iterData.iteration}</span>` +
+    `<span class="text-xs text-slate-400">${iterData.papers_count || 0} papers found</span>` +
+    `</div>` +
+    `<p class="text-sm text-slate-300 mb-2">${iterData.summary || ""}</p>` +
+    (flaws ? `<ul class="list-disc list-inside space-y-1">${flaws}</ul>` : "");
+  container.appendChild(card);
+}
+
+function renderIdeaReport(report) {
+  const container = document.getElementById("idea-report-content");
+  if (!container) return;
+  showIdeaSection("idea-report-section");
+
+  const verdictColor = {
+    novel: "text-green-400",
+    supported: "text-blue-400",
+    contradicted: "text-yellow-400",
+    flawed: "text-red-400",
+    error: "text-red-500",
+  }[report.verdict] || "text-slate-300";
+
+  const noveltyPct = Math.round((report.novelty_score || 0) * 100);
+  const flaws = (report.flaws || []).map((f) => `<li class="text-red-300 text-sm">${f}</li>`).join("");
+  const supported = (report.supported_claims || []).map((c) => `<li class="text-green-300 text-sm">${c}</li>`).join("");
+  const contradicted = (report.contradicted_claims || []).map((c) => `<li class="text-yellow-300 text-sm">${c}</li>`).join("");
+  const papers = (report.similar_papers || []).map((p) => `<li class="text-slate-300 text-sm">${p}</li>`).join("");
+  const recs = (report.recommendations || []).map((r) => `<li class="text-slate-300 text-sm">${r}</li>`).join("");
+
+  container.innerHTML =
+    `<div class="rounded-lg border border-slate-700 bg-slate-900 p-4">` +
+    `<div class="flex items-center gap-4 mb-4">` +
+    `<span class="text-2xl font-bold ${verdictColor}">${(report.verdict || "unknown").toUpperCase()}</span>` +
+    `<div class="flex-1">` +
+    `<div class="text-xs text-slate-400 mb-1">Novelty Score: ${noveltyPct}%</div>` +
+    `<div class="h-2 bg-slate-700 rounded-full overflow-hidden">` +
+    `<div class="h-full bg-cyan-500" style="width: ${noveltyPct}%"></div>` +
+    `</div></div></div>` +
+    (recs ? `<div class="mb-4"><h4 class="font-medium text-slate-200 mb-2">Recommendations</h4><ul class="list-disc list-inside space-y-1">${recs}</ul></div>` : "") +
+    (flaws ? `<div class="mb-4"><h4 class="font-medium text-red-400 mb-2">Identified Flaws</h4><ul class="list-disc list-inside space-y-1">${flaws}</ul></div>` : "") +
+    (supported ? `<div class="mb-4"><h4 class="font-medium text-green-400 mb-2">Supported Claims</h4><ul class="list-disc list-inside space-y-1">${supported}</ul></div>` : "") +
+    (contradicted ? `<div class="mb-4"><h4 class="font-medium text-yellow-400 mb-2">Contradicted Claims</h4><ul class="list-disc list-inside space-y-1">${contradicted}</ul></div>` : "") +
+    (papers ? `<div><h4 class="font-medium text-slate-200 mb-2">Similar Papers Found</h4><ul class="list-disc list-inside space-y-1">${papers}</ul></div>` : "") +
+    `</div>`;
+}
+
+async function loadIdeaSessions() {
+  const el = document.getElementById("idea-sessions-list");
+  if (!el) return;
+  const sessions = await fetchJson("/api/idea/sessions");
+  if (!sessions || !sessions.length) {
+    el.innerHTML = "<span class='text-slate-500'>No past sessions yet.</span>";
+    return;
+  }
+  el.innerHTML = sessions.map((s) => {
+    const verdictColor = {
+      novel: "text-green-400", supported: "text-blue-400",
+      contradicted: "text-yellow-400", flawed: "text-red-400",
+    }[s.verdict] || "text-slate-400";
+    return (
+      `<div class="rounded border border-slate-700 bg-slate-900 p-3 mb-2">` +
+      `<div class="flex items-center justify-between">` +
+      `<span class="font-medium text-slate-200">${s.title || s.session_id}</span>` +
+      `<span class="${verdictColor} text-xs font-semibold">${(s.verdict || "?").toUpperCase()}</span>` +
+      `</div>` +
+      `<div class="text-xs text-slate-400 mt-1">${s.domain || ""} · novelty ${Math.round((s.novelty_score || 0) * 100)}% · ${s.iterations_done || 0} iteration(s) · ${s.flaws_count || 0} flaw(s)</div>` +
+      `</div>`
+    );
+  }).join("");
+}
+
+// Extend WebSocket event handler with idea events
+const _origHandleEvent = handleEvent;
+handleEvent = function (event) {
+  if (event.type && event.type.startsWith("idea_")) {
+    handleIdeaEvent(event);
+  } else {
+    _origHandleEvent(event);
+  }
+};
+
+function handleIdeaEvent(event) {
+  switch (event.type) {
+    case "idea_log":
+      if (event.session_id === activeIdeaSession) {
+        ideaLog(event.line || "");
+      }
+      break;
+    case "idea_progress":
+      if (event.session_id === activeIdeaSession) {
+        setIdeaProgress(event.progress || 0, event.label || "");
+      }
+      break;
+    case "idea_extracted":
+      if (event.session_id === activeIdeaSession && event.idea) {
+        ideaLog(`Extracted: "${event.idea.title || ""}" (domain: ${event.idea.domain || "unknown"})`);
+      }
+      break;
+    case "idea_memory_loaded":
+      if (event.session_id === activeIdeaSession) {
+        ideaLog(`Loaded ${(event.insights || []).length} memory insight(s) from prior sessions.`);
+      }
+      break;
+    case "idea_iteration_done":
+      if (event.session_id === activeIdeaSession && event.iteration) {
+        renderIdeaIteration(event.iteration);
+      }
+      break;
+    case "idea_finished":
+      if (event.session_id === activeIdeaSession) {
+        setIdeaProgress(1.0, "Complete");
+        const badge = document.getElementById("idea-status-badge");
+        if (badge) {
+          badge.textContent = "Done";
+          badge.className = "px-2 py-1 rounded-full text-xs font-medium bg-green-700 text-white";
+        }
+        const submitBtn = document.getElementById("idea-submit-btn");
+        if (submitBtn) submitBtn.disabled = false;
+        if (event.final_report) {
+          renderIdeaReport(event.final_report);
+        }
+        loadIdeaSessions();
+      }
+      break;
+  }
+}
+
+// Form submission
+const ideaForm = document.getElementById("idea-form");
+if (ideaForm) {
+  ideaForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = document.getElementById("idea-text")?.value?.trim();
+    if (!text) {
+      alert("Please enter a research idea description.");
+      return;
+    }
+    const maxIter = document.getElementById("idea-iterations")?.value || "3";
+    const filesInput = document.getElementById("idea-files");
+    const submitBtn = document.getElementById("idea-submit-btn");
+
+    if (submitBtn) submitBtn.disabled = true;
+
+    // Reset UI
+    const logEl = document.getElementById("idea-live-log");
+    if (logEl) logEl.textContent = "";
+    const iterCards = document.getElementById("idea-iteration-cards");
+    if (iterCards) iterCards.innerHTML = "";
+    const reportContent = document.getElementById("idea-report-content");
+    if (reportContent) reportContent.innerHTML = "";
+    document.getElementById("idea-iterations-section")?.classList.add("hidden");
+    document.getElementById("idea-report-section")?.classList.add("hidden");
+    showIdeaSection("idea-progress-section");
+    setIdeaProgress(0, "Submitting...");
+    const badge = document.getElementById("idea-status-badge");
+    if (badge) {
+      badge.textContent = "Running";
+      badge.className = "px-2 py-1 rounded-full text-xs font-medium bg-amber-600 text-white";
+    }
+
+    const formData = new FormData();
+    formData.append("text", text);
+    formData.append("max_iterations", maxIter);
+    if (filesInput && filesInput.files) {
+      for (const file of filesInput.files) {
+        formData.append("files", file);
+      }
+    }
+
+    try {
+      const resp = await fetch("/api/idea/verify", { method: "POST", body: formData });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        alert("Error: " + (err.error || resp.statusText));
+        if (submitBtn) submitBtn.disabled = false;
+        return;
+      }
+      const data = await resp.json();
+      activeIdeaSession = data.session_id;
+      ideaLog(`Session started: ${data.session_id}`);
+    } catch (err) {
+      alert("Failed to submit: " + err.message);
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+
+const sessionsRefreshBtn = document.getElementById("idea-sessions-refresh");
+if (sessionsRefreshBtn) {
+  sessionsRefreshBtn.addEventListener("click", loadIdeaSessions);
+}
+
+// Load past sessions when the Idea tab is activated
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.tab === "idea") {
+      loadIdeaSessions();
+    }
+  });
+});

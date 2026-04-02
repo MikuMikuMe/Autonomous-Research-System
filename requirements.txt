@@ -21,6 +21,9 @@ arxiv>=2.0.0
 semanticscholar>=0.8.0
 pypdf>=4.0.0
 
+# Required for FastAPI multipart/file uploads (idea submission)
+python-multipart>=0.0.9
+
 # Security pins (CVE fixes) — keep updated
 filelock>=3.20.3
 requests>=2.32.4

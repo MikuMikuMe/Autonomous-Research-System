@@ -81,6 +81,31 @@ CREATE TABLE IF NOT EXISTS verifications (
     evidence    TEXT,
     error       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS idea_sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT    NOT NULL UNIQUE,
+    timestamp       TEXT    NOT NULL,
+    title           TEXT,
+    domain          TEXT,
+    keywords        TEXT,
+    hypotheses      TEXT,
+    proposed_methods TEXT,
+    verdict         TEXT,
+    novelty_score   REAL,
+    flaws_count     INTEGER DEFAULT 0,
+    iterations_done INTEGER DEFAULT 0,
+    final_report    TEXT
+);
+
+CREATE TABLE IF NOT EXISTS idea_insights (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT    NOT NULL,
+    domain       TEXT    NOT NULL,
+    insight      TEXT    NOT NULL,
+    insight_type TEXT,
+    timestamp    TEXT    NOT NULL
+);
 """
 
 
@@ -585,6 +610,97 @@ class MemoryStore:
         ).rowcount
         self.db.commit()
         return deleted
+
+    # ================================================================
+    # Idea verification session API
+    # ================================================================
+
+    def store_idea_session(
+        self,
+        session_id: str,
+        title: str,
+        domain: str,
+        hypotheses: list[str],
+        methods: list[str],
+        keywords: list[str],
+        final_report: dict,
+        iterations: list[dict],
+    ) -> None:
+        """Persist an idea verification session and extract insights into memory."""
+        verdict = final_report.get("verdict", "")
+        novelty_score = final_report.get("novelty_score")
+        flaws = final_report.get("flaws", [])
+        now = datetime.now().isoformat()
+
+        self.db.execute(
+            """INSERT OR REPLACE INTO idea_sessions
+               (session_id, timestamp, title, domain, keywords, hypotheses,
+                proposed_methods, verdict, novelty_score, flaws_count,
+                iterations_done, final_report)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, now, title, domain,
+                json.dumps(keywords),
+                json.dumps(hypotheses),
+                json.dumps(methods),
+                verdict,
+                novelty_score,
+                len(flaws),
+                len(iterations),
+                json.dumps(final_report),
+            ),
+        )
+
+        # Extract and store insights for future sessions in the same domain
+        for flaw in flaws[:5]:
+            if flaw and flaw.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'pitfall', ?)""",
+                    (session_id, domain, flaw.strip()[:500], now),
+                )
+
+        for claim in final_report.get("supported_claims", [])[:3]:
+            if claim and claim.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'supported_claim', ?)""",
+                    (session_id, domain, claim.strip()[:500], now),
+                )
+
+        for method in methods[:3]:
+            if method and method.strip():
+                self.db.execute(
+                    """INSERT INTO idea_insights
+                       (session_id, domain, insight, insight_type, timestamp)
+                       VALUES (?, ?, ?, 'effective_method', ?)""",
+                    (session_id, domain, method.strip()[:500], now),
+                )
+
+        self.db.commit()
+
+    def get_idea_insights(self, domain: str, limit: int = 10) -> list[str]:
+        """Return previously accumulated insights for a given research domain."""
+        rows = self.db.execute(
+            """SELECT insight FROM idea_insights
+               WHERE domain LIKE ?
+               ORDER BY id DESC LIMIT ?""",
+            (f"%{domain}%", limit),
+        ).fetchall()
+        return [r["insight"] for r in rows]
+
+    def get_idea_sessions(self, limit: int = 20) -> list[dict]:
+        """Return a summary of recent idea verification sessions."""
+        rows = self.db.execute(
+            """SELECT session_id, timestamp, title, domain, verdict,
+                      novelty_score, flaws_count, iterations_done
+               FROM idea_sessions
+               ORDER BY id DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ================================================================
     # Legacy API wrappers (backward compat)

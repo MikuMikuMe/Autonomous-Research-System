@@ -218,6 +218,79 @@ def generate(
         return None
 
 
+def generate_multimodal(
+    text_prompt: str,
+    image_paths: list[str] | None = None,
+    *,
+    system_instruction: str | None = None,
+    max_output_tokens: int = 8192,
+) -> str | None:
+    """
+    Generate a response from Gemini with optional images (multimodal).
+    Passes each image as an inline_data part alongside the text prompt.
+    Falls back to text-only generation on any error.
+    """
+    client = _get_client()
+    if client is None:
+        return None
+
+    try:
+        from google.genai import types
+
+        parts: list = []
+        for img_path in (image_paths or []):
+            try:
+                from pathlib import Path as _Path
+                ext = _Path(img_path).suffix.lower()
+                mime_map = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".gif": "image/gif",
+                    ".webp": "image/webp",
+                }
+                mime = mime_map.get(ext, "image/png")
+                with open(img_path, "rb") as fh:
+                    img_bytes = fh.read()
+                parts.append(types.Part(inline_data=types.Blob(mime_type=mime, data=img_bytes)))
+            except Exception as img_err:
+                print(f"  [LLM] Image load failed ({img_path}): {img_err}")
+        parts.append(types.Part(text=text_prompt))
+
+        contents = [types.Content(role="user", parts=parts)]
+
+        config_kwargs: dict = {
+            "max_output_tokens": max_output_tokens,
+            "temperature": 0.2,
+        }
+        if system_instruction:
+            config_kwargs["system_instruction"] = system_instruction
+        config = types.GenerateContentConfig(**config_kwargs)
+
+        response = _call_with_fallback(client, contents, config, config_kwargs, False)
+        if not (response and response.text):
+            return None
+
+        text = response.text.strip()
+        if not _looks_truncated(text):
+            return text
+
+        # If still truncated, fall back to text-only generation
+        return generate(
+            text_prompt,
+            system_instruction=system_instruction,
+            max_output_tokens=max_output_tokens,
+        )
+
+    except Exception as e:
+        print(f"  [LLM] Multimodal generate failed: {e}")
+        return generate(
+            text_prompt,
+            system_instruction=system_instruction,
+            max_output_tokens=max_output_tokens,
+        )
+
+
 def generate_with_grounding(prompt: str, system_instruction: str | None = None) -> str | None:
     """Generate with Google Search grounding for research/verification."""
     return generate(prompt, use_grounding=True, system_instruction=system_instruction)
