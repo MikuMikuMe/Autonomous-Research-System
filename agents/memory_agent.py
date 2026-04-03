@@ -106,6 +106,46 @@ CREATE TABLE IF NOT EXISTS idea_insights (
     insight_type TEXT,
     timestamp    TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS research_goals (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_text     TEXT    NOT NULL,
+    start_time    TEXT    NOT NULL,
+    iteration     INTEGER DEFAULT 0,
+    status        TEXT    DEFAULT 'active',
+    achieved_at   TEXT
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_entries (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id           INTEGER REFERENCES research_goals(id),
+    timestamp         TEXT    NOT NULL,
+    claim             TEXT    NOT NULL,
+    source            TEXT,
+    confidence        REAL    DEFAULT 0.5,
+    verdict           TEXT,
+    rationale         TEXT,
+    supporting_papers TEXT
+);
+
+CREATE TABLE IF NOT EXISTS pitfalls (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    description  TEXT    NOT NULL,
+    flaw_type    TEXT,
+    first_seen   TEXT    NOT NULL,
+    frequency    INTEGER DEFAULT 1,
+    resolved     BOOLEAN DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS effective_methods (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    description  TEXT    NOT NULL,
+    method_type  TEXT,
+    domain       TEXT,
+    success_rate REAL    DEFAULT 1.0,
+    use_count    INTEGER DEFAULT 1,
+    last_used    TEXT    NOT NULL
+);
 """
 
 
@@ -698,6 +738,183 @@ class MemoryStore:
 
         self.db.commit()
         return removed
+
+    # ================================================================
+    # Research loop API — goals, knowledge, pitfalls, effective methods
+    # ================================================================
+
+    def log_research_goal(self, goal_text: str) -> int:
+        """Register a new research goal and return its id."""
+        cur = self.db.execute(
+            "INSERT INTO research_goals (goal_text, start_time) VALUES (?, ?)",
+            (goal_text, datetime.now().isoformat()),
+        )
+        self.db.commit()
+        return cur.lastrowid  # type: ignore[return-value]
+
+    def update_goal_progress(self, goal_id: int, iteration: int, status: str = "active") -> None:
+        """Update iteration count and status of a research goal."""
+        kwargs: dict = {"iteration": iteration, "status": status}
+        if status == "achieved":
+            kwargs["achieved_at"] = datetime.now().isoformat()
+            self.db.execute(
+                """UPDATE research_goals
+                   SET iteration = ?, status = ?, achieved_at = ?
+                   WHERE id = ?""",
+                (iteration, status, kwargs["achieved_at"], goal_id),
+            )
+        else:
+            self.db.execute(
+                "UPDATE research_goals SET iteration = ?, status = ? WHERE id = ?",
+                (iteration, status, goal_id),
+            )
+        self.db.commit()
+
+    def add_knowledge(
+        self,
+        claim: str,
+        source: str = "unknown",
+        confidence: float = 0.5,
+        supporting_papers: list[str] | None = None,
+        verdict: str = "neutral",
+        rationale: str = "",
+        goal_id: int | None = None,
+    ) -> None:
+        """Store a cross-validated knowledge entry."""
+        self.db.execute(
+            """INSERT INTO knowledge_entries
+               (goal_id, timestamp, claim, source, confidence, verdict, rationale, supporting_papers)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                goal_id,
+                datetime.now().isoformat(),
+                claim[:2000],
+                source,
+                confidence,
+                verdict,
+                rationale[:1000],
+                json.dumps(supporting_papers or []),
+            ),
+        )
+        self.db.commit()
+
+    def add_pitfall(self, description: str, flaw_type: str = "unknown") -> None:
+        """Record a new pitfall or increment its frequency if already known."""
+        existing = self.db.execute(
+            "SELECT id, frequency FROM pitfalls WHERE description = ?",
+            (description[:2000],),
+        ).fetchone()
+        if existing:
+            self.db.execute(
+                "UPDATE pitfalls SET frequency = ? WHERE id = ?",
+                (existing["frequency"] + 1, existing["id"]),
+            )
+        else:
+            self.db.execute(
+                "INSERT INTO pitfalls (description, flaw_type, first_seen) VALUES (?, ?, ?)",
+                (description[:2000], flaw_type, datetime.now().isoformat()),
+            )
+        self.db.commit()
+
+    def add_effective_method(
+        self, description: str, method_type: str = "unknown", domain: str = ""
+    ) -> None:
+        """Record an effective method or update its usage count."""
+        existing = self.db.execute(
+            "SELECT id, use_count FROM effective_methods WHERE description = ?",
+            (description[:2000],),
+        ).fetchone()
+        now = datetime.now().isoformat()
+        if existing:
+            self.db.execute(
+                "UPDATE effective_methods SET use_count = ?, last_used = ? WHERE id = ?",
+                (existing["use_count"] + 1, now, existing["id"]),
+            )
+        else:
+            self.db.execute(
+                """INSERT INTO effective_methods
+                   (description, method_type, domain, last_used)
+                   VALUES (?, ?, ?, ?)""",
+                (description[:2000], method_type, domain, now),
+            )
+        self.db.commit()
+
+    def get_known_pitfalls(self, limit: int = 20, unresolved_only: bool = True) -> list[dict]:
+        """Return recorded pitfalls, most frequent first."""
+        where = "WHERE NOT resolved" if unresolved_only else ""
+        rows = self.db.execute(
+            f"SELECT * FROM pitfalls {where} ORDER BY frequency DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_effective_methods(self, domain: str = "", limit: int = 20) -> list[dict]:
+        """Return effective methods, optionally filtered by domain."""
+        if domain:
+            rows = self.db.execute(
+                """SELECT * FROM effective_methods
+                   WHERE domain = ? OR domain = ''
+                   ORDER BY use_count DESC, success_rate DESC LIMIT ?""",
+                (domain, limit),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM effective_methods ORDER BY use_count DESC, success_rate DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_relevant_knowledge(self, query: str = "", limit: int = 20) -> list[dict]:
+        """Return recent knowledge entries, optionally filtered by claim text."""
+        if query:
+            rows = self.db.execute(
+                """SELECT * FROM knowledge_entries
+                   WHERE claim LIKE ?
+                   ORDER BY id DESC LIMIT ?""",
+                (f"%{query}%", limit),
+            ).fetchall()
+        else:
+            rows = self.db.execute(
+                "SELECT * FROM knowledge_entries ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def research_journey_summary(self) -> dict:
+        """Return a full summary of the research loop state."""
+        summary: dict = {
+            "goals": [],
+            "total_knowledge_entries": 0,
+            "supported_claims": 0,
+            "contradicted_claims": 0,
+            "top_pitfalls": [],
+            "effective_methods": [],
+        }
+
+        goals = self.db.execute(
+            "SELECT * FROM research_goals ORDER BY id DESC LIMIT 10"
+        ).fetchall()
+        summary["goals"] = [dict(g) for g in goals]
+
+        counts = self.db.execute(
+            """SELECT verdict, COUNT(*) as cnt FROM knowledge_entries
+               GROUP BY verdict"""
+        ).fetchall()
+        for row in counts:
+            if row["verdict"] == "support":
+                summary["supported_claims"] = row["cnt"]
+            elif row["verdict"] == "contradict":
+                summary["contradicted_claims"] = row["cnt"]
+
+        total = self.db.execute(
+            "SELECT COUNT(*) as cnt FROM knowledge_entries"
+        ).fetchone()
+        summary["total_knowledge_entries"] = total["cnt"] if total else 0
+
+        summary["top_pitfalls"] = self.get_known_pitfalls(limit=5)
+        summary["effective_methods"] = self.get_effective_methods(limit=5)
+
+        return summary
 
     # ================================================================
     # Idea verification session API

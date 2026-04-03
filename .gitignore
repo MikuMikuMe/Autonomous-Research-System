@@ -1,8 +1,11 @@
 .venv/
 .venv_new/
+.pytest_cache/
+.github/
 venv/
 __pycache__/
 *.pyc
+
 outputs/
 kaggle.json
 .env
@@ -12,3 +15,6 @@ kaggle.json
 # Copy mcp.json.example to mcp.json and add your alphaXiv token (do not commit)
 .cursor/mcp.json
 .cursor
+.sisyphus
+.claude
+*.log

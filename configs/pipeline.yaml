@@ -31,3 +31,10 @@ pipeline:
   optimizer:
     run_after_research: true
     apply_proposals: false  # set true for auto-apply, or use --apply
+
+research_loop:
+  max_iterations: 10
+  converge_threshold: 0.90   # fraction of claims verified to declare convergence
+  evolve_every: 2            # run SEPL prompt evolution every N iterations
+  compact_every: 3           # compact memory every N iterations
+  flaw_halt_severity: critical  # severity that blocks convergence: critical|high|any|none
