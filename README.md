@@ -1,6 +1,9 @@
-# Bias Audit Pipeline
+# Autonomous Research System
 
-A unified agentic pipeline for bias detection, mitigation, and auditing in financial AI systems. The system produces a technically verified research paper on bias in credit-card fraud detection, aligned with EU AI Act fairness thresholds. Agents run autonomously; a **Judge** evaluates quality (rule-based + optional Gemini semantic evaluation); failed agents are retried with feedback until they pass or exhaust retries.
+A unified agentic platform with two modes of operation:
+
+1. **Bias Audit Pipeline** — end-to-end bias detection, mitigation, and auditing for financial AI, producing an IEEE/CUCAI-format research paper. Agents run autonomously; a **Judge** evaluates quality (rule-based + optional Gemini semantic evaluation); failed agents are retried with feedback until they pass or exhaust retries.
+2. **Continuous Research Loop** — a domain-agnostic, iterative research agent that verifies user-supplied claims through literature retrieval, code verification, cross-validation, and flaw detection, converging once a configurable fraction of claims are verified.
 
 ---
 
@@ -8,6 +11,7 @@ A unified agentic pipeline for bias detection, mitigation, and auditing in finan
 
 - [Overview](#overview)
 - [Research Workflow](#research-workflow)
+- [Continuous Research Loop](#continuous-research-loop)
 - [Architecture](#architecture)
 - [Project Structure](#project-structure)
 - [Components](#components)
@@ -105,7 +109,40 @@ mitigated_model = XGBClassifier().fit(X_res, y_res)
 
 ---
 
+## Continuous Research Loop
+
+```bash
+# Run with a claims file and explicit goal
+python main.py --research --claims claims.json --goal "My research goal" --iterations 8
+
+# Use outputs/idea_input.json as the default claims source
+python main.py --research
+
+# Run agents directly
+python -m agents.cross_validation_agent   # cross-validate claims vs papers
+python -m agents.flaw_detection_agent     # detect logical/statistical flaws
+python -m orchestration.continuous_research_loop --help
+```
+
+Each iteration follows **DISCOVER → PLAN → ACT → OBSERVE → REFLECT**:
+
+| Phase | What happens |
+|-------|-------------|
+| **DISCOVER** | Load and validate claims; run autonomy self-check |
+| **PLAN** | Derive research queries from claims + memory gaps |
+| **ACT** | Verify claims (code) → retrieve papers → cross-validate → detect flaws |
+| **OBSERVE** | Compute `verified_ratio`; check for blocking flaws |
+| **REFLECT** | Persist findings to MemoryStore; evolve prompts (SEPL); compact memory |
+
+**Convergence** is declared when `verified_ratio ≥ converge_threshold` (default `0.90`) **and** no flaws above `flaw_halt_severity` (default `critical`) remain, or when `max_iterations` (default `10`) is reached.
+
+Key outputs: `outputs/cross_validation_report.json`, `outputs/flaw_report.json`, `outputs/research_loop_report.json`.
+
+---
+
 ## Architecture
+
+### Bias Audit Pipeline
 
 ```mermaid
 flowchart TB
@@ -152,50 +189,86 @@ flowchart TB
 
 **Execution model:** Agents run as subprocesses (`python -m agents.detection_agent 42`). The orchestrator does not modify agent code; it controls invocation order, seed, and retry count.
 
+### Continuous Research Loop
+
+```mermaid
+flowchart TB
+    Claims(["Claims / idea_input.json"]) --> SC["Self-Check (DISCOVER)"]
+    SC --> Plan["Query Generation (PLAN)"]
+    Plan --> Ver["Verification Agent (code)"]
+    Ver --> RA["Research Agent (papers)"]
+    RA --> CV["Cross-Validation Agent"]
+    CV --> FD["Flaw Detection Agent"]
+    FD --> Obs{{"OBSERVE: verified_ratio ≥ threshold\nAND no blocking flaws?"}}
+    Obs -->|"Yes"| Done(["Converged ✓"])
+    Obs -->|"No, iterations left"| Ref["REFLECT: persist → SEPL → compact"]
+    Ref --> Plan
+    Obs -->|"Max iterations"| Report(["Loop Report"])
+    style Claims fill:#2E7D32,color:#fff
+    style Done fill:#2E7D32,color:#fff
+    style Report fill:#E65100,color:#fff
+    style Obs fill:#1565C0,color:#fff
+```
+
 ---
 
 ## Project Structure
 
 ```
-QMIND-Agent/
-├── main.py                   # CLI entry point (runs full pipeline)
+Autonomous-Research-System/
+├── main.py                   # CLI entry point (bias pipeline or research loop)
 ├── run_gui.py                # GUI entry point (web dashboard)
 │
 ├── agents/                   # All agent modules
-│   ├── detection_agent.py    # Bias detection (baseline models, fairness metrics)
-│   ├── mitigation_agent.py   # Bias mitigation (SMOTE, threshold adjustment)
-│   ├── auditing_agent.py     # Paper generation (sections, LaTeX, PDF)
-│   ├── judge_agent.py        # Quality evaluation (rule-based + Gemini)
-│   ├── revision_agent.py     # Applies Judge feedback to paper
-│   ├── verification_agent.py # Code-based claim verification
-│   ├── research_agent.py     # alphaXiv/arXiv research for claims
-│   ├── gap_check_agent.py    # Paper vs reference PDF coverage
-│   ├── coverage_agent.py     # Finds papers for gaps
-│   ├── topic_coverage_agent.py
-│   ├── reproducibility_agent.py
-│   ├── claim_comparison_agent.py
-│   ├── format_check_agent.py
-│   ├── optimizer_agent.py    # Prompt refinement from memory
-│   └── memory_agent.py       # Session persistence
+│   ├── detection_agent.py          # Bias detection (baseline models, fairness metrics)
+│   ├── mitigation_agent.py         # Bias mitigation (SMOTE, threshold adjustment)
+│   ├── auditing_agent.py           # Paper generation (sections, LaTeX, PDF)
+│   ├── judge_agent.py              # Quality evaluation (rule-based + Gemini)
+│   ├── revision_agent.py           # Applies Judge feedback to paper
+│   ├── verification_agent.py       # Code-based claim verification
+│   ├── research_agent.py           # alphaXiv/arXiv research for claims
+│   ├── cross_validation_agent.py   # Cross-validate claims vs retrieved papers
+│   ├── flaw_detection_agent.py     # Detect logical/statistical/methodological flaws
+│   ├── self_check_agent.py         # Autonomy diagnostics (DISCOVER/PLAN/ACT/OBSERVE/REFLECT)
+│   ├── idea_input_agent.py         # Parse uploaded research ideas (multimodal)
+│   ├── gap_check_agent.py          # Paper vs reference PDF coverage
+│   ├── coverage_agent.py           # Finds papers for gaps
+│   ├── topic_coverage_agent.py     # Verifies topic comprehensiveness
+│   ├── reproducibility_agent.py    # Reproducibility validation
+│   ├── claim_comparison_agent.py   # Compares literature vs our claims
+│   ├── format_check_agent.py       # Validates output tables/JSON/LaTeX format
+│   ├── optimizer_agent.py          # Prompt refinement from memory
+│   └── memory_agent.py             # SQLite-backed self-learning persistence
+│
+├── orchestration/            # Pipeline orchestration
+│   ├── orchestrator.py                    # Main pipeline + Judge loop + retries
+│   ├── continuous_research_loop.py        # Iterative claims → verify → retrieve → evolve
+│   ├── research_orchestrator.py           # Coordinates research phases
+│   ├── continuous_runner.py               # Background process manager
+│   ├── idea_verification_orchestrator.py  # Idea submission workflow
+│   └── sep_layer.py                       # Self-evolution protocol (SEPL)
+│
+├── runtime/                  # Unified execution engine
+│   └── core.py               # PipelineRuntime, RuntimeConfig, RuntimeSummary
 │
 ├── utils/                    # Shared utilities
-│   ├── llm_client.py         # Gemini API wrapper
-│   ├── config_loader.py      # Loads prompts/rules from configs/
-│   ├── latex_generator.py    # LaTeX paper (IEEE/CUCAI 2026 format)
-│   ├── claims_utils.py       # Data-driven claim inference
-│   ├── pdf_source_extractor.py
+│   ├── schemas.py                  # Dataclass I/O contracts (ModelMetrics, BaselineResults, …)
+│   ├── llm_client.py               # Gemini API wrapper
+│   ├── context.py                  # PipelineContext (shared state across agents)
+│   ├── events.py                   # EventBus for pub/sub agent communication
+│   ├── config_loader.py            # Loads prompts/rules from configs/
+│   ├── claims_loader.py            # Parse claims from JSON, text, or idea_input.json
+│   ├── claims_utils.py             # Claims manipulation utilities
+│   ├── query_generator.py          # Generate research queries dynamically
+│   ├── latex_generator.py          # LaTeX paper (IEEE/CUCAI 2026 format)
+│   ├── research_client.py          # alphaXiv/arXiv/Semantic Scholar integration
+│   ├── research_result_processor.py
 │   ├── citations_helper.py
 │   ├── citation_enrichment.py
 │   ├── paper_quality_guardrail.py
-│   ├── structure_review.py   # Structure review, citation research
-│   ├── resource_registry.py
-│   ├── research_client.py
-│   └── research_result_processor.py
-│
-├── orchestration/            # Pipeline orchestration
-│   ├── orchestrator.py       # Main pipeline + Judge loop + retries
-│   ├── research_orchestrator.py
-│   └── sep_layer.py          # Self-evolution protocol
+│   ├── pdf_source_extractor.py
+│   ├── structure_review.py         # Structure review, citation research
+│   └── resource_registry.py
 │
 ├── gui/                      # Web dashboard
 │   ├── server.py             # FastAPI + WebSocket
@@ -203,18 +276,13 @@ QMIND-Agent/
 │   └── static/               # index.html, app.js
 │
 ├── configs/                  # Declarative configuration
-│   ├── pipeline.yaml         # Pipeline agent order, judge, memory
+│   ├── pipeline.yaml         # Pipeline agent order, judge thresholds, research loop settings
 │   ├── prompts/              # Gemini prompt templates
 │   └── rules/                # Consistency rules (JSON)
 │
-├── data/                     # Reference PDFs
-│   ├── bias_mitigation.pdf
-│   ├── Bias Auditing Framework.pdf
-│   ├── Bias Detection findings.pdf
-│   └── how_biases_are_introduced.pdf
-│
 ├── docs/                     # Documentation
 │   ├── ALPHAXIV_SETUP.md
+│   ├── ARXIV_MCP_SETUP.md
 │   ├── RESEARCH_CHECKLIST.md
 │   └── SELF_EVOLUTION_ROADMAP.md
 │
@@ -222,16 +290,25 @@ QMIND-Agent/
 │   ├── paper/                # paper.tex, paper.pdf, references.bib
 │   ├── paper_sections/       # Individual LaTeX sections
 │   ├── figures/              # Publication-ready figures
-│   ├── memory/               # Session memory (self-evolution)
+│   ├── memory/               # memory.db (SQLite knowledge base)
 │   ├── baseline_results.json
 │   ├── mitigation_results.json
+│   ├── cross_validation_report.json
+│   ├── flaw_report.json
+│   ├── research_loop_report.json
 │   └── structure_review.json
+│
+├── tests/                    # Test suite
+│   ├── runtime/              # Runtime contract tests
+│   ├── gui/                  # GUI tests
+│   ├── integration/          # End-to-end integration tests
+│   └── fixtures/
 │
 ├── requirements.txt
 ├── README.md
 ├── SETUP.md
 ├── authors.txt
-├── env.example
+├── .env.example
 └── kaggle.json.example
 ```
 
@@ -239,14 +316,27 @@ QMIND-Agent/
 
 ## Components
 
+### Runtime (`runtime/core.py`)
+
+- **Role:** Unified execution engine for both pipeline modes.
+- **Key classes:** `RuntimeConfig` (loaded from `configs/pipeline.yaml`), `PipelineRuntime` (runs agents, manages retries, emits events), `RuntimeSummary` (structured results).
+- **Integrates:** `PipelineContext`, `EventBus`, typed schemas from `utils/schemas.py`.
+
 ### Orchestrator (`orchestration/orchestrator.py`)
 
-- **Role:** Central controller. Runs agents in order, calls Judge, handles retries.
-- **Constants:** `MAX_RETRIES = 3`, `AGENTS = ["detection", "mitigation", "auditing"]`
+- **Role:** Central controller for the bias audit pipeline. Runs agents in order, calls Judge, handles retries.
+- **Constants:** `MAX_RETRIES = 3`, core agents: detection → mitigation → auditing; research agents run afterwards.
 - **Key functions:**
   - `run_agent(agent_name, seed)` — subprocess `python -m agents.<module> <seed>`
   - `run_judge(agent_name)` — imports and calls `agents.judge_agent.evaluate(agent_name)`
 - **Exit:** `sys.exit(1)` if any agent fails after all retries.
+
+### Continuous Research Loop (`orchestration/continuous_research_loop.py`)
+
+- **Role:** Domain-agnostic iterative research. Loads claims, runs DISCOVER→PLAN→ACT→OBSERVE→REFLECT until convergence.
+- **Key function:** `run_research_loop(claims_source, goal, max_iterations, converge_threshold, …) → dict`
+- **Convergence:** `verified_ratio ≥ converge_threshold` **and** no blocking flaws.
+- **Self-evolution:** SEPL prompt evolution every `evolve_every` iterations; memory compaction every `compact_every` iterations.
 
 ### Judge Agent (`agents/judge_agent.py`)
 
@@ -278,12 +368,47 @@ QMIND-Agent/
 - **Output:** `paper_sections/*.tex`, `paper/paper.tex`, `paper/paper.pdf`, `structure_review.json`
 - **CLI:** `python -m agents.auditing_agent`
 
+### Cross-Validation Agent (`agents/cross_validation_agent.py`)
+
+- **Role:** Cross-validate claims against retrieved papers; assigns verdict: `support | contradict | neutral` per claim.
+- **Input:** Claims list + `research_findings.json` (or loads from disk).
+- **Output:** `outputs/cross_validation_report.json`; persists verdicts to MemoryStore.
+- **CLI:** `python -m agents.cross_validation_agent`
+
+### Flaw Detection Agent (`agents/flaw_detection_agent.py`)
+
+- **Role:** Three-pass flaw detection — literature contradictions, code-verification failures, Gemini semantic analysis against known pitfalls.
+- **Severity levels:** `critical | high | medium | low`
+- **Output:** `outputs/flaw_report.json`; persists new critical/high flaws as pitfalls in MemoryStore.
+- **CLI:** `python -m agents.flaw_detection_agent`
+
+### Memory Agent (`agents/memory_agent.py`)
+
+- **Role:** SQLite-backed self-learning persistence at `outputs/memory/memory.db`.
+- **Pipeline tables:** `runs`, `agent_runs`, `metrics`, `verifications`, `idea_sessions`, `idea_insights`
+- **Research loop tables:**
+
+  | Table | Purpose |
+  |-------|---------|
+  | `research_goals` | Tracks goal text, iteration, status (`active`/`achieved`) |
+  | `knowledge_entries` | Cross-validated findings: claim, verdict, confidence, supporting papers |
+  | `pitfalls` | Known failure modes; frequency-counted; auto-populated by `flaw_detection_agent` |
+  | `effective_methods` | Methods that worked; auto-populated by research loop on verified claims |
+
+- **Key APIs:** `persist_run()`, `log_research_goal()`, `add_knowledge()`, `add_pitfall()`, `add_effective_method()`, `get_known_pitfalls()`, `get_effective_methods()`, `get_relevant_knowledge()`, `research_journey_summary()`
+
 ### LLM Client (`utils/llm_client.py`)
 
-- **Role:** Gemini API wrapper for Judge and Auditing agents.
-- **Config:** `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `GEMINI_MODEL` (default: `gemini-3.1-pro-preview`)
+- **Role:** Gemini API wrapper for all agents.
+- **Config:** `GOOGLE_API_KEY` or `GEMINI_API_KEY`, `GEMINI_MODEL` (default: `gemini-3.1-pro-preview`), `GEMINI_FALLBACK_MODEL` (default: `gemini-2.5-pro`)
 - **Features:** `generate()`, `generate_with_grounding()` (Google Search), `generate_json()`
 - **Optional:** Loads `.env` via `python-dotenv` if installed.
+
+### Schemas (`utils/schemas.py`)
+
+- **Role:** Typed dataclass contracts between agents. Replaces implicit dict I/O.
+- **Key types:** `ModelMetrics`, `BaselineResults`, `MitigationResults`, `JudgeResult`, `AgentRunRecord`, `VerificationRecord`
+- **No external dependencies** — stdlib only.
 
 ### LaTeX Generator (`utils/latex_generator.py`)
 
@@ -385,7 +510,7 @@ Returns PASS/FAIL with reasoning; can fail on semantic issues even if rule-based
 - **Structure review:** Verifies required sections (Background, Use Case, Detection, Mitigation, Audit, Discussion) and formulas (Demographic Parity, Disparate Impact, Equalized Odds, Accuracy, F1).
 - **Citation research:** Uses Gemini with Google Search grounding to find recent (2023–2025) papers supporting the claims.
 
-**Setup:** See [SETUP.md](SETUP.md). Model override: `GEMINI_MODEL=gemini-2.0-flash` (default: `gemini-1.5-pro`).
+**Setup:** See [SETUP.md](SETUP.md). Model override: `GEMINI_MODEL=gemini-2.5-flash` (default: `gemini-3.1-pro-preview`).
 
 ---
 
@@ -418,18 +543,27 @@ When configured, Cursor's AI can search papers via [alphaXiv](https://alphaxiv.o
 
 ## Configuration
 
+### Bias Audit Pipeline
+
 | Location | Variable | Default | Purpose |
 |----------|----------|---------|---------|
 | `orchestration/orchestrator.py` | `MAX_RETRIES` | 3 | Max attempts per agent |
-| `orchestration/orchestrator.py` | `AGENTS` | `["detection","mitigation","auditing"]` | Core pipeline order |
-| `orchestration/orchestrator.py` | `RESEARCH_AGENTS` | research, gap_check, coverage, reproducibility | Runs after paper ready |
 | `agents/judge_agent.py` | `MIN_DETECTION_MODELS` | 2 | Required baseline count |
 | `agents/judge_agent.py` | `MIN_MITIGATION_STRATEGIES` | 2 | Required mitigation count |
 | `agents/judge_agent.py` | `MIN_PAPER_LENGTH` | 2000 | Min draft chars |
 | `agents/judge_agent.py` | `REQUIRED_PAPER_SECTIONS` | [...] | Section names |
 | `utils/llm_client.py` | `GEMINI_MODEL` | `gemini-3.1-pro-preview` | Gemini model |
 | `utils/llm_client.py` | `GOOGLE_API_KEY` | env | API key |
-| All agents | `PROJECT_ROOT` | auto-detected | Project root directory |
+
+### Continuous Research Loop (`configs/pipeline.yaml → research_loop`)
+
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `max_iterations` | `10` | Max loop iterations |
+| `converge_threshold` | `0.90` | Fraction of verified claims required |
+| `evolve_every` | `2` | Run SEPL prompt evolution every N iterations |
+| `compact_every` | `3` | Compact memory every N iterations |
+| `flaw_halt_severity` | `critical` | Severity blocking convergence (`critical\|high\|any\|none`) |
 
 ---
 
@@ -467,6 +601,29 @@ python -m agents.mitigation_agent [seed]
 python -m agents.auditing_agent
 python -m agents.judge_agent [detection|mitigation|auditing]
 python -m agents.judge_agent               # evaluate all
+python -m agents.cross_validation_agent   # cross-validate claims vs papers
+python -m agents.flaw_detection_agent     # detect flaws in claims/findings
+```
+
+### Continuous Research Loop
+
+```bash
+# Use outputs/idea_input.json as claims source
+python main.py --research
+
+# Specify claims file, goal, and options
+python main.py --research --claims claims.json --goal "My research goal" --iterations 8
+
+# Full options
+python main.py --research \
+  --claims claims.json \
+  --goal "Verify fairness mitigation claims" \
+  --iterations 10 \
+  --threshold 0.9 \
+  --flaw-halt critical
+
+# Run the loop module directly
+python -m orchestration.continuous_research_loop --help
 ```
 
 ### Optional Setup
@@ -489,6 +646,10 @@ python -m agents.judge_agent               # evaluate all
 | `outputs/baseline_results.json` | Detection metrics |
 | `outputs/mitigation_results.json` | Mitigation metrics + asymmetric cost |
 | `outputs/structure_review.json` | Structure review + citation research |
+| `outputs/cross_validation_report.json` | Per-claim literature verdict (support/contradict/neutral) |
+| `outputs/flaw_report.json` | Detected flaws with severity and suggested fixes |
+| `outputs/research_loop_report.json` | Full research loop run summary |
+| `outputs/memory/memory.db` | SQLite knowledge base (all pipeline + research loop tables) |
 
 ---
 
@@ -540,13 +701,17 @@ Pipeline configuration is in `configs/pipeline.yaml`. Prompts are in `configs/pr
 ## Quick Reference
 
 ```bash
-# Full pipeline
+# Bias audit pipeline
 python main.py
+
+# Continuous research loop
+python main.py --research
+python main.py --research --claims claims.json --goal "My goal" --iterations 8
 
 # GUI dashboard
 python run_gui.py
 
-# Individual agents
+# Individual pipeline agents
 python -m agents.detection_agent [seed]
 python -m agents.mitigation_agent [seed]
 python -m agents.auditing_agent
@@ -555,8 +720,13 @@ python -m agents.auditing_agent
 python -m agents.judge_agent [detection|mitigation|auditing]
 python -m agents.judge_agent   # evaluate all
 
-# Research pipeline only
-python -m orchestration.research_orchestrator
+# Research loop agents
+python -m agents.cross_validation_agent
+python -m agents.flaw_detection_agent
+python -m orchestration.continuous_research_loop --help
+
+# Run tests
+pytest
 ```
 
 See [SETUP.md](SETUP.md) for venv, Kaggle, LaTeX, and Gemini setup.
