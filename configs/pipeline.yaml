@@ -1,10 +1,11 @@
-# Config composition for Bias Audit Pipeline (agents, tools, envs, memory)
-# Phase 4: Config-driven orchestration
+# Config composition for Autonomous Research System
+# Generalized research pipeline — domain-agnostic
 
 pipeline:
-  name: qmind-research
-  version: "1.0"
+  name: autonomous-research
+  version: "2.0"
 
+  # Core agents (legacy bias pipeline — kept as example)
   core_agents:
     - detection
     - mitigation
@@ -27,14 +28,78 @@ pipeline:
   memory:
     persist_session: true
     persist_events_on_failure: true
+    cross_session: true
+    cross_session_db: null  # null = default ~/.autonomous_research/cross_session_memory.db
 
   optimizer:
     run_after_research: true
-    apply_proposals: false  # set true for auto-apply, or use --apply
+    apply_proposals: false
 
+# Multi-LLM configuration — provider swapping is just a config change
+llm:
+  provider: google           # google | openai | anthropic | ollama
+  model: null                # null = use provider default
+  fallback_provider: null    # e.g., openai
+  fallback_model: null       # e.g., gpt-4o-mini
+  temperature: 0.2
+  max_output_tokens: 8192
+
+# Web search configuration
+search:
+  provider: tavily           # tavily | google | none
+  tavily_api_key: null       # or set TAVILY_API_KEY env var
+  max_results: 10
+  include_academic: true     # also search arXiv + Semantic Scholar
+  include_web: true          # Tavily web search
+
+# Continuous research loop settings
 research_loop:
   max_iterations: 10
-  converge_threshold: 0.90   # fraction of claims verified to declare convergence
-  evolve_every: 2            # run SEPL prompt evolution every N iterations
-  compact_every: 3           # compact memory every N iterations
-  flaw_halt_severity: critical  # severity that blocks convergence: critical|high|any|none
+  converge_threshold: 0.90
+  evolve_every: 2
+  compact_every: 3
+  flaw_halt_severity: critical
+  # Technique discovery — find methods through research instead of hardcoding
+  auto_discover_techniques: true
+  technique_search_queries: 3  # number of technique-discovery searches per iteration
+
+# Sandbox configuration for code execution
+sandbox:
+  enabled: true
+  timeout_seconds: 120
+  max_memory_mb: 2048
+  use_docker: false          # true = run in Docker container
+  docker_image: python:3.12-slim
+  allowed_imports:
+    - numpy
+    - pandas
+    - scikit-learn
+    - scipy
+    - matplotlib
+    - json
+    - math
+    - statistics
+
+# Distributed tracing
+tracing:
+  enabled: false
+  provider: langsmith        # langsmith | opentelemetry
+  langsmith_project: autonomous-research
+  # Set LANGCHAIN_API_KEY, LANGCHAIN_TRACING_V2=true in .env
+
+# MCP (Model Context Protocol) integration
+mcp:
+  enabled: false
+  servers: []
+  # Example:
+  # servers:
+  #   - name: code-interpreter
+  #     command: npx
+  #     args: ["-y", "@anthropic/code-interpreter-mcp"]
+  #   - name: database
+  #     url: http://localhost:3001/mcp
+
+# Telegram bot
+telegram:
+  enabled: false
+  # Set TELEGRAM_BOT_TOKEN in .env

@@ -1,0 +1,44 @@
+# Autonomous Research System — Docker Compose
+# Usage:
+#   docker compose up              # Start research API server
+#   docker compose up --build      # Rebuild and start
+#   docker compose --profile latex up  # Include LaTeX sidecar
+
+services:
+  # ── Main API Server ──────────────────────────────────────────────────────
+  research-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./outputs:/app/outputs
+      - ./configs:/app/configs
+      - research-memory:/root/.autonomous_research
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── LaTeX PDF Compiler (optional) ────────────────────────────────────────
+  latex:
+    image: texlive/texlive:latest
+    profiles:
+      - latex
+    volumes:
+      - ./outputs/paper:/workdir
+    working_dir: /workdir
+    entrypoint: ["sh", "-c", "while true; do inotifywait -e modify /workdir/paper.tex 2>/dev/null && pdflatex -interaction=nonstopmode paper.tex; sleep 5; done"]
+    restart: unless-stopped
+
+volumes:
+  research-memory:
+    driver: local
