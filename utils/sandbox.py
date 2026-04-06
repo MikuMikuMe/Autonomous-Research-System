@@ -173,6 +173,7 @@ def _execute_local(
             tmp_file = f.name
 
         run_env = os.environ.copy()
+        run_env["PYTHONIOENCODING"] = "utf-8"
         if env:
             run_env.update(env)
 

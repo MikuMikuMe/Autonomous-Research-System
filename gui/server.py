@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -20,6 +21,15 @@ IDEA_UPLOADS_DIR = OUTPUTS_DIR / "idea_uploads"
 IDEA_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Bias Audit Pipeline")
+
+# CORS — allow React dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Static files
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -211,6 +221,71 @@ async def get_figure(name: str):
 @app.get("/")
 async def index():
     return FileResponse(STATIC_DIR / "index.html")
+
+
+# ---------------------------------------------------------------------------
+# Generalized Research API (used by React frontend)
+# ---------------------------------------------------------------------------
+
+
+_research_queue: queue.Queue = queue.Queue()
+_research_thread = None
+_research_consumer_task = None
+
+
+def _run_research(idea: str) -> None:
+    """Thread target: run research pipeline and push events to _research_queue."""
+    try:
+        _research_queue.put({"type": "research_log", "line": f"Starting research: {idea}"})
+        # Re-use existing pipeline; future: plug in LangGraph orchestrator
+        from gui.streaming_orchestrator import run_pipeline
+        run_pipeline(_research_queue)
+    except Exception as e:
+        try:
+            _research_queue.put({"type": "research_log", "line": f"[ERROR] {e}"})
+            _research_queue.put({
+                "type": "research_finished",
+                "success": False,
+                "report": f"Research failed: {e}",
+            })
+        except Exception:
+            pass
+
+
+async def _research_consumer() -> None:
+    """Broadcast research events to all WebSocket clients."""
+    while True:
+        try:
+            event = await asyncio.to_thread(_research_queue.get)
+            msg = json.dumps(event)
+            for ws in list(_ws_clients):
+                try:
+                    await ws.send_text(msg)
+                except Exception:
+                    pass
+            if event.get("type") == "research_finished":
+                break
+        except Exception:
+            break
+
+
+def _ensure_research_consumer_running() -> None:
+    global _research_consumer_task
+    if _research_consumer_task and not _research_consumer_task.done():
+        return
+    _research_consumer_task = asyncio.create_task(_research_consumer())
+
+
+@app.post("/api/research")
+async def start_research(idea: str = Form(...)):
+    """Start a generalized research run. Progress streams via WebSocket."""
+    global _research_thread
+    if _research_thread and _research_thread.is_alive():
+        return JSONResponse({"status": "already_running"})
+    _research_thread = threading.Thread(target=_run_research, args=(idea,), daemon=True)
+    _research_thread.start()
+    _ensure_research_consumer_running()
+    return JSONResponse({"status": "started"})
 
 
 # ---------------------------------------------------------------------------
