@@ -24,6 +24,36 @@ pypdf>=4.0.0
 # Required for FastAPI multipart/file uploads (idea submission)
 python-multipart>=0.0.9
 
+# Multi-LLM support via LangChain
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0
+langchain-openai>=0.3.0
+langchain-anthropic>=0.3.0
+
+# LangGraph orchestration
+langgraph>=0.3.0
+
+# Tavily web search
+tavily-python>=0.5.0
+
+# Distributed tracing
+langsmith>=0.2.0
+opentelemetry-api>=1.20.0
+opentelemetry-sdk>=1.20.0
+
+# MCP integration
+mcp>=1.0.0
+
+# Telegram bot
+python-telegram-bot>=21.0
+
+# Sandbox security
+docker>=7.0.0
+
+# YAML config
+pyyaml>=6.0.0
+
 # Security pins (CVE fixes) — keep updated
 filelock>=3.20.3
 requests>=2.32.4

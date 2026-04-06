@@ -162,7 +162,7 @@ def _check_prompts_exist() -> CheckResult:
 def _check_dependencies() -> CheckResult:
     """Check that key Python dependencies are installed."""
     start = time.monotonic()
-    required = ["yaml", "fastapi", "numpy", "sklearn", "fairlearn", "xgboost"]
+    required = ["yaml", "fastapi", "numpy", "sklearn"]
     missing = []
     for pkg in required:
         try:
@@ -609,12 +609,19 @@ def run_self_check() -> SelfCheckReport:
 
     # DISCOVER
     core_modules = [
-        "agents.detection_agent", "agents.mitigation_agent", "agents.auditing_agent",
         "agents.judge_agent", "agents.memory_agent", "agents.verification_agent",
         "agents.revision_agent", "agents.optimizer_agent", "agents.research_agent",
     ]
+    # Legacy bias-pipeline agents are optional (need kagglehub, imblearn, etc.)
+    optional_modules = [
+        "agents.detection_agent", "agents.mitigation_agent", "agents.auditing_agent",
+    ]
     for mod in core_modules:
         all_checks.append(_check_agent_importable(mod))
+    for mod in optional_modules:
+        check = _check_agent_importable(mod)
+        check.phase = "OBSERVE"  # non-blocking phase so missing deps don't prevent autonomy
+        all_checks.append(check)
     all_checks.append(_check_config_exists())
     all_checks.append(_check_prompts_exist())
     all_checks.append(_check_dependencies())
