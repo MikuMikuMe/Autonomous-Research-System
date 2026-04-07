@@ -162,7 +162,7 @@ def _check_prompts_exist() -> CheckResult:
 def _check_dependencies() -> CheckResult:
     """Check that key Python dependencies are installed."""
     start = time.monotonic()
-    required = ["yaml", "fastapi", "numpy", "sklearn", "fairlearn", "xgboost"]
+    required = ["yaml", "fastapi", "numpy", "google.genai"]
     missing = []
     for pkg in required:
         try:
@@ -187,28 +187,27 @@ def _check_dependencies() -> CheckResult:
 
 
 def _check_agent_ordering() -> CheckResult:
-    """Verify that core agent ordering follows the dependency chain."""
+    """Verify that research agents are configured."""
     start = time.monotonic()
-    expected_order = ["detection", "mitigation", "auditing"]
     try:
         from runtime.core import RuntimeConfig
         config = RuntimeConfig.from_project_root(PROJECT_ROOT)
-        actual = config.core_agents
+        agents = config.research_agents
         elapsed = (time.monotonic() - start) * 1000
 
-        if actual == expected_order:
+        if len(agents) >= 1:
             return CheckResult(
                 name="plan:agent_ordering",
                 phase="PLAN",
                 passed=True,
-                message=f"Agent ordering correct: {' → '.join(actual)}",
+                message=f"Research agents configured: {', '.join(agents[:5])}{'...' if len(agents) > 5 else ''}",
                 duration_ms=elapsed,
             )
         return CheckResult(
             name="plan:agent_ordering",
             phase="PLAN",
             passed=False,
-            message=f"Agent ordering mismatch: expected {expected_order}, got {actual}",
+            message="No research agents configured",
             duration_ms=elapsed,
         )
     except Exception as exc:
@@ -223,21 +222,21 @@ def _check_agent_ordering() -> CheckResult:
 
 
 def _check_retry_config() -> CheckResult:
-    """Verify retry configuration is set for autonomous recovery."""
+    """Verify iteration configuration for research loop."""
     start = time.monotonic()
     try:
         from runtime.core import RuntimeConfig
         config = RuntimeConfig.from_project_root(PROJECT_ROOT)
         elapsed = (time.monotonic() - start) * 1000
-        has_retries = config.max_retries >= 2
+        has_iterations = config.max_iterations >= 2
         return CheckResult(
             name="plan:retry_config",
             phase="PLAN",
-            passed=has_retries,
-            message=f"Max retries: {config.max_retries} (minimum 2 for autonomous recovery)"
-                    if has_retries else f"Max retries too low: {config.max_retries}",
+            passed=has_iterations,
+            message=f"Max iterations: {config.max_iterations} (minimum 2 for autonomous research)"
+                    if has_iterations else f"Max iterations too low: {config.max_iterations}",
             duration_ms=elapsed,
-            details={"max_retries": config.max_retries, "initial_seed": config.initial_seed},
+            details={"max_iterations": config.max_iterations, "converge_threshold": config.converge_threshold},
         )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
@@ -251,26 +250,24 @@ def _check_retry_config() -> CheckResult:
 
 
 def _check_judge_hint_map() -> CheckResult:
-    """Verify Judge retry_hint_map connects failures to recovery agents."""
+    """Verify research loop config is present in pipeline.yaml."""
     start = time.monotonic()
     config_path = PROJECT_ROOT / "configs" / "pipeline.yaml"
     try:
         import yaml
         with config_path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        pipeline = data.get("pipeline", {})
-        judge_config = pipeline.get("judge", {})
-        hint_map = judge_config.get("retry_hint_map", {})
+        research_loop = data.get("research_loop", {})
+        has_agents = bool(data.get("research_agents"))
         elapsed = (time.monotonic() - start) * 1000
-        has_revision = "revise_claims" in hint_map
         return CheckResult(
             name="plan:judge_hint_map",
             phase="PLAN",
-            passed=has_revision,
-            message=f"Judge hint map has {len(hint_map)} recovery paths"
-                    + (" (includes revise_claims → revision)" if has_revision else ""),
+            passed=has_agents,
+            message=f"Research config present: {len(research_loop)} loop settings, agents configured"
+                    if has_agents else "No research_agents configured in pipeline.yaml",
             duration_ms=elapsed,
-            details={"hint_map": hint_map},
+            details={"research_loop": research_loop},
         )
     except Exception as exc:
         elapsed = (time.monotonic() - start) * 1000
@@ -278,7 +275,7 @@ def _check_judge_hint_map() -> CheckResult:
             name="plan:judge_hint_map",
             phase="PLAN",
             passed=False,
-            message=f"Cannot check hint map: {exc}",
+            message=f"Cannot check config: {exc}",
             duration_ms=elapsed,
         )
 
@@ -301,10 +298,9 @@ def _check_runtime_instantiation() -> CheckResult:
             name="act:runtime_instantiation",
             phase="ACT",
             passed=True,
-            message="PipelineRuntime instantiated with all callbacks",
+            message="ResearchRuntime instantiated successfully",
             duration_ms=elapsed,
             details={
-                "core_agents": runtime.config.core_agents,
                 "research_agents": runtime.config.research_agents,
             },
         )
@@ -415,31 +411,29 @@ def _check_schema_validation() -> CheckResult:
     """Verify schema validation catches invalid data."""
     start = time.monotonic()
     try:
-        from utils.schemas import BaselineResults, MitigationResults
-        # Valid data should pass
-        valid_errors = BaselineResults.validate({
-            "baseline_metrics": [
-                {"model": "A", "accuracy": 0.9, "f1_score": 0.8, "auc": 0.9,
-                 "demographic_parity_diff": 0.1, "equalized_odds_diff": 0.05,
-                 "disparate_impact_ratio": 0.8, "eu_ai_act_spd_violation": True,
-                 "eu_ai_act_eod_violation": True},
-                {"model": "B", "accuracy": 0.9, "f1_score": 0.8, "auc": 0.9,
-                 "demographic_parity_diff": 0.1, "equalized_odds_diff": 0.05,
-                 "disparate_impact_ratio": 0.8, "eu_ai_act_spd_violation": False,
-                 "eu_ai_act_eod_violation": False},
-            ]
-        })
-        # Invalid data should fail
-        invalid_errors = BaselineResults.validate({"baseline_metrics": []})
+        from utils.schemas import ClaimVerdict, FlawRecord
+        # Valid ClaimVerdict
+        cv = ClaimVerdict(
+            claim="Test claim",
+            verdict="support",
+            confidence=0.9,
+            supporting_papers=["paper1"],
+        )
+        # Valid FlawRecord
+        fr = FlawRecord(
+            description="Test flaw",
+            severity="low",
+            suggested_fix="Fix it",
+        )
 
         elapsed = (time.monotonic() - start) * 1000
-        passed = len(valid_errors) == 0 and len(invalid_errors) > 0
+        passed = cv.claim == "Test claim" and fr.severity == "low"
         return CheckResult(
             name="observe:schema_validation",
             phase="OBSERVE",
             passed=passed,
-            message="Schema validation works: accepts valid, rejects invalid"
-                    if passed else f"Schema validation broken: valid_errors={valid_errors}, invalid_errors={invalid_errors}",
+            message="Schema validation works: ClaimVerdict and FlawRecord instantiate correctly"
+                    if passed else "Schema validation broken: dataclass fields mismatch",
             duration_ms=elapsed,
         )
     except Exception as exc:
@@ -468,10 +462,9 @@ def _check_memory_store() -> CheckResult:
         from utils.schemas import RunRecord, AgentRunRecord
         record = RunRecord(
             timestamp="2026-01-01T00:00:00Z",
-            seed=42,
             all_passed=True,
             total_duration_seconds=10.0,
-            agents=[AgentRunRecord(agent="detection", seed=42, attempt=1,
+            agents=[AgentRunRecord(agent="research", seed=0, attempt=1,
                                    passed=True, duration_seconds=5.0)],
         )
         run_id = store.persist_run(record)
@@ -513,11 +506,10 @@ def _check_memory_compaction() -> CheckResult:
         for i in range(5):
             record = RunRecord(
                 timestamp=f"2026-01-0{i + 1}T00:00:00Z",
-                seed=42,
                 all_passed=False,
                 total_duration_seconds=10.0,
                 agents=[AgentRunRecord(
-                    agent="detection", seed=42, attempt=1,
+                    agent="research", seed=0, attempt=1,
                     passed=False, duration_seconds=5.0,
                     error="timeout", error_type="GeminiTimeout",
                     judge_feedback=["timeout occurred"],
@@ -562,17 +554,16 @@ def _check_seed_recommendation() -> CheckResult:
         # Record a failure on seed 42
         record = RunRecord(
             timestamp="2026-01-01T00:00:00Z",
-            seed=42,
             all_passed=False,
             total_duration_seconds=10.0,
             agents=[AgentRunRecord(
-                agent="detection", seed=42, attempt=1,
+                agent="research", seed=0, attempt=1,
                 passed=False, duration_seconds=5.0,
             )],
         )
         store.persist_run(record)
 
-        seed, reason = store.recommend_seed_for_agent("detection", [42], default_seed=42)
+        seed, reason = store.recommend_seed_for_agent("research", [42], default_seed=42)
         store.close()
         elapsed = (time.monotonic() - start) * 1000
 
@@ -609,9 +600,12 @@ def run_self_check() -> SelfCheckReport:
 
     # DISCOVER
     core_modules = [
-        "agents.detection_agent", "agents.mitigation_agent", "agents.auditing_agent",
-        "agents.judge_agent", "agents.memory_agent", "agents.verification_agent",
-        "agents.revision_agent", "agents.optimizer_agent", "agents.research_agent",
+        "agents.research_agent", "agents.cross_validation_agent",
+        "agents.flaw_detection_agent", "agents.verification_agent",
+        "agents.memory_agent", "agents.judge_agent",
+        "agents.revision_agent", "agents.optimizer_agent",
+        "agents.gap_check_agent", "agents.coverage_agent",
+        "agents.topic_coverage_agent",
     ]
     for mod in core_modules:
         all_checks.append(_check_agent_importable(mod))

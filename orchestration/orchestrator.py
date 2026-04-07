@@ -1,13 +1,18 @@
+"""
+CLI-facing orchestrator for the Autonomous Research System.
+
+Wraps ResearchRuntime with a CLI event printer for terminal usage.
+"""
+
 from __future__ import annotations
 
 import argparse
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from runtime.core import PipelineRuntime, RuntimeConfig
+from runtime.core import ResearchRuntime, RuntimeConfig
 from utils.events import EventBus, EventType, PipelineEvent
 
 
@@ -16,61 +21,11 @@ os.chdir(PROJECT_ROOT)
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-MODULE_MAP = {
-    "detection": "agents.detection_agent",
-    "mitigation": "agents.mitigation_agent",
-    "auditing": "agents.auditing_agent",
-}
-
-
-def _classify_error(exc: Exception | None, stderr: str = "") -> str:
-    msg = str(exc) if exc else stderr
-    if "LaTeX" in msg or "pdflatex" in msg:
-        return "LaTeXCompileError"
-    if "timeout" in msg.lower() or "timed out" in msg.lower():
-        return "GeminiTimeout"
-    if "schema" in msg.lower() or "missing key" in msg.lower():
-        return "SchemaValidation"
-    if "FileNotFoundError" in msg or "not found" in msg.lower():
-        return "FileNotFound"
-    if "JSONDecodeError" in msg:
-        return "JSONParse"
-    return "Unknown"
-
-
-def _run_agent_subprocess(agent_name: str, seed: int, bus: EventBus) -> int:
-    module = MODULE_MAP[agent_name]
-    bus.log(agent_name, f"Starting {agent_name} agent...")
-    result = subprocess.run(
-        [sys.executable, "-m", module, str(seed)],
-        cwd=str(PROJECT_ROOT),
-        capture_output=False,
-    )
-    return result.returncode
-
-
-def _run_research_module(module_name: str, bus: EventBus) -> int:
-    bus.log("research", f"Running {module_name}...")
-    result = subprocess.run(
-        [sys.executable, "-m", module_name],
-        cwd=str(PROJECT_ROOT),
-        capture_output=False,
-    )
-    if result.returncode != 0:
-        bus.log("research", f"[WARN] {module_name} exited with {result.returncode} (non-fatal)")
-    return result.returncode
-
-
-def _run_judge(agent_name: str):
-    from agents.judge_agent import evaluate
-
-    return evaluate(agent_name)
-
 
 def _print_cli_event(event: PipelineEvent) -> None:
     if event.type == EventType.AGENT_STARTED:
         print(f"\n{'─' * 70}")
-        print(f"  AGENT: {event.agent.upper()}")
+        print(f"  PHASE: {event.agent.upper()}")
         print("─" * 70)
     elif event.type == EventType.AGENT_LOG and event.line:
         print(f"  {event.line}")
@@ -82,82 +37,91 @@ def _print_cli_event(event: PipelineEvent) -> None:
             print(f"  {prefix} {line}")
     elif event.type == EventType.JOURNEY_SUMMARY:
         summary = event.summary or {}
-        agent_summaries = summary.get("agents") or {}
         print("\n" + "-" * 70)
-        print("  MEMORY SUMMARY")
+        print("  RESEARCH JOURNEY SUMMARY")
         print("-" * 70)
-        print(f"  Total runs remembered: {summary.get('total_runs', 0)}")
-        for agent_name, agent_summary in agent_summaries.items():
-            success_rate = float(agent_summary.get("success_rate", 0.0) or 0.0)
-            best_seed = agent_summary.get("best_seed")
-            best_seed_text = best_seed if best_seed is not None else "n/a"
-            print(
-                f"  {agent_name:<12} attempts={agent_summary.get('total_attempts', 0)} "
-                f"success={success_rate:.0%} best_seed={best_seed_text}"
-            )
-            for direction in (agent_summary.get("improvement_directions") or [])[:2]:
-                print(f"    -> {direction}")
-            recent_trials = agent_summary.get("recent_trials") or []
-            latest_failed = next((trial for trial in recent_trials if not trial.get("passed", False)), None)
-            if latest_failed:
-                error_type = latest_failed.get("error_type") or "Unknown"
-                feedback_preview = latest_failed.get("feedback_preview") or ""
-                print(f"    last_failure={error_type}: {feedback_preview}")
+        for key, val in summary.items():
+            if isinstance(val, dict):
+                print(f"  {key}:")
+                for k2, v2 in val.items():
+                    print(f"    {k2}: {v2}")
+            else:
+                print(f"  {key}: {val}")
     elif event.type == EventType.PIPELINE_FINISHED:
-        results: dict[str, dict[str, Any]] = event.results or {}
+        results: dict[str, Any] = event.results or {}
         print("\n" + "=" * 70)
-        print("  PIPELINE SUMMARY")
+        print("  RESEARCH SUMMARY")
         print("=" * 70)
-        for name, result in results.items():
-            status = "PASS" if result.get("passed") else "FAIL"
-            attempts = result.get("attempts", 0)
-            print(f"  {name:<12} {status}  (attempts: {attempts})")
+        converged = results.get("converged", False)
+        iterations = results.get("iterations_completed", 0)
+        print(f"  Converged: {'Yes' if converged else 'No'}")
+        print(f"  Iterations: {iterations}")
+        if results.get("error"):
+            print(f"  Error: {results['error']}")
         print("=" * 70)
 
 
-def build_runtime(bus: EventBus | None = None) -> PipelineRuntime:
+def build_runtime(bus: EventBus | None = None) -> ResearchRuntime:
     event_bus = bus or EventBus()
     config = RuntimeConfig.from_project_root(PROJECT_ROOT)
-    return PipelineRuntime(
-        config=config,
-        bus=event_bus,
-        run_agent=_run_agent_subprocess,
-        run_research_module=_run_research_module,
-        run_judge=_run_judge,
-        classify_error=_classify_error,
-    )
+    return ResearchRuntime(config=config, bus=event_bus)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Bias Audit Pipeline through the shared runtime.")
+    parser = argparse.ArgumentParser(description="Autonomous Research System — Orchestrator")
+    parser.add_argument("--mode", choices=["goal", "report"], default="goal",
+                        help="Research mode: goal-oriented or report/deep-dive")
+    parser.add_argument("--goal", "-g", default="", help="Research goal")
+    parser.add_argument("--topic", default=None, help="[report] Topic for deep-dive")
+    parser.add_argument("--claims", "-c", default=None, help="Path to claims file")
+    parser.add_argument("--iterations", "-n", type=int, default=None, help="Max iterations")
+    parser.add_argument("--threshold", "-t", type=float, default=None, help="Convergence threshold")
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    _ = parse_args(argv)
+    args = parse_args(argv)
+
+    mode = args.mode
+    goal = args.goal
+    if mode == "report" and args.topic:
+        goal = f"Produce a comprehensive research report on: {args.topic}"
+
     print("=" * 70)
-    print("  UNIFIED AGENTIC SYSTEM — Orchestrator")
-    print("  Pipeline: Detection → Mitigation → Auditing → Research")
-    print("  Judge evaluates core agents; Research runs after paper is ready")
+    print("  AUTONOMOUS RESEARCH SYSTEM — Orchestrator")
+    print(f"  Mode: {mode.upper()}")
+    if goal:
+        print(f"  Goal: {goal[:60]}{'...' if len(goal) > 60 else ''}")
     print("=" * 70)
 
     bus = EventBus()
     bus.subscribe(_print_cli_event)
-    summary = build_runtime(bus).run()
+    runtime = build_runtime(bus)
+    summary = runtime.run(
+        mode=mode,
+        goal=goal,
+        claims_source=args.claims,
+        max_iterations=args.iterations,
+        converge_threshold=args.threshold,
+    )
 
-    if summary.all_passed:
+    if summary.converged:
         print("\n" + "=" * 70)
-        print("  ALL PHASES COMPLETE")
+        print("  RESEARCH CONVERGED")
         print("=" * 70)
         print("  Outputs in outputs/")
-        print("  - outputs/paper/paper.tex, paper_sections/*.tex")
-        print("  - outputs/research_findings.json, gap_report.json")
-        print("  - outputs/coverage_suggestions.json, reproducibility_report.json")
-        print("  - outputs/*.png, *.json, *.npz")
+        print("  - outputs/research_loop_report.json")
+        print("  - outputs/cross_validation_report.json")
+        print("  - outputs/flaw_report.json")
+        print("  - outputs/verification_report.json")
         return 0
 
-    print("\n  Pipeline incomplete. Fix failures and re-run.")
-    return 1
+    if summary.error:
+        print(f"\n  Research failed: {summary.error}")
+        return 1
+
+    print(f"\n  Research completed after {summary.iterations_completed} iterations (not converged).")
+    return 0
 
 
 if __name__ == "__main__":

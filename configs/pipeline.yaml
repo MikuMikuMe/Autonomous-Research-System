@@ -1,40 +1,71 @@
-# Config composition for Bias Audit Pipeline (agents, tools, envs, memory)
-# Phase 4: Config-driven orchestration
+# Autonomous Research System Configuration
+# Two modes: goal-oriented research and report/deep-dive
 
-pipeline:
-  name: qmind-research
-  version: "1.0"
+system:
+  name: autonomous-research
+  version: "2.0"
 
-  core_agents:
-    - detection
-    - mitigation
-    - auditing
+# LLM provider configuration
+llm:
+  # Provider priority order (first available is used)
+  # Override with LLM_PROVIDER env var
+  priority:
+    - gemini
+    - openai
+    - anthropic
+  # Default models per provider (overridable via env vars)
+  defaults:
+    gemini: gemini-2.5-flash
+    openai: gpt-4o
+    anthropic: claude-sonnet-4-20250514
 
-  research_agents:
-    - agents.research_agent
-    - agents.gap_check_agent
-    - agents.coverage_agent
-    - agents.topic_coverage_agent
-    - agents.reproducibility_agent
-    - agents.verification_agent
-    - agents.optimizer_agent
+# Research agents used in both modes
+research_agents:
+  - agents.research_agent
+  - agents.cross_validation_agent
+  - agents.flaw_detection_agent
+  - agents.verification_agent
+  - agents.gap_check_agent
+  - agents.coverage_agent
+  - agents.topic_coverage_agent
+  - agents.optimizer_agent
 
-  judge:
-    agent: judge
-    retry_hint_map:
-      revise_claims: revision
+# Memory configuration
+memory:
+  persist_session: true
+  cross_session: true  # Enable cross-session memory
+  db_path: outputs/memory/memory.db
 
-  memory:
-    persist_session: true
-    persist_events_on_failure: true
+# Optimizer settings
+optimizer:
+  run_after_research: true
+  apply_proposals: false
 
-  optimizer:
-    run_after_research: true
-    apply_proposals: false  # set true for auto-apply, or use --apply
-
+# Research loop settings (shared by both modes)
 research_loop:
   max_iterations: 10
-  converge_threshold: 0.90   # fraction of claims verified to declare convergence
-  evolve_every: 2            # run SEPL prompt evolution every N iterations
-  compact_every: 3           # compact memory every N iterations
-  flaw_halt_severity: critical  # severity that blocks convergence: critical|high|any|none
+  converge_threshold: 0.90
+  evolve_every: 2
+  compact_every: 3
+  flaw_halt_severity: critical  # critical|high|any|none
+
+# Mode-specific overrides
+modes:
+  goal:
+    max_iterations: 10
+    converge_threshold: 0.90
+    description: "Iterative research toward a quantifiable goal"
+  report:
+    max_iterations: 5
+    converge_threshold: 0.70
+    description: "Deep-dive research producing a comprehensive report"
+
+# Tracing / observability
+tracing:
+  enabled: true  # Override with TRACE_ENABLED=false
+  service_name: autonomous-research
+
+# Sandbox settings for code execution
+sandbox:
+  timeout: 30
+  max_memory_mb: 512

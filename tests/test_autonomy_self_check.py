@@ -241,11 +241,10 @@ def test_memory_lifecycle_persist_compact_query() -> None:
     for i in range(10):
         record = RunRecord(
             timestamp=f"2026-01-{i + 1:02d}T00:00:00Z",
-            seed=42,
             all_passed=False,
             total_duration_seconds=10.0,
             agents=[AgentRunRecord(
-                agent="detection", seed=42, attempt=1,
+                agent="research", seed=0, attempt=1,
                 passed=False, duration_seconds=5.0,
                 error="timeout", error_type="GeminiTimeout",
                 judge_feedback=["timeout occurred"],
@@ -257,11 +256,10 @@ def test_memory_lifecycle_persist_compact_query() -> None:
     for i in range(2):
         record = RunRecord(
             timestamp=f"2026-02-{i + 1:02d}T00:00:00Z",
-            seed=43 + i,
             all_passed=True,
             total_duration_seconds=60.0,
             agents=[AgentRunRecord(
-                agent="detection", seed=43 + i, attempt=1,
+                agent="research", seed=0, attempt=1,
                 passed=True, duration_seconds=30.0,
             )],
         )
@@ -284,10 +282,10 @@ def test_memory_lifecycle_persist_compact_query() -> None:
     # Journey summary should still work
     summary = store.journey_summary()
     assert summary["total_runs"] > 0
-    assert "detection" in summary["agents"]
+    assert "research" in summary["agents"]
 
     # Seed recommendation should prefer successful seed
-    seed, reason = store.recommend_seed_for_agent("detection", [42], default_seed=42)
+    seed, reason = store.recommend_seed_for_agent("research", [42], default_seed=42)
     assert seed != 42 or "best" in reason.lower() or "success" in reason.lower()
 
     store.close()

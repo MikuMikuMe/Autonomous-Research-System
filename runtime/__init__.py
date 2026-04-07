@@ -1,3 +1,6 @@
-from runtime.core import PipelineRuntime, RuntimeConfig, RuntimeSummary
+from runtime.core import ResearchRuntime, RuntimeConfig, RuntimeSummary
 
-__all__ = ["PipelineRuntime", "RuntimeConfig", "RuntimeSummary"]
+# Backward compat alias
+PipelineRuntime = ResearchRuntime
+
+__all__ = ["ResearchRuntime", "PipelineRuntime", "RuntimeConfig", "RuntimeSummary"]

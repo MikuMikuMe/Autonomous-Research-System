@@ -1,9 +1,12 @@
 """
-PipelineContext — Shared state object passed through the orchestrator.
+ResearchContext — Shared state object for research pipeline modes.
 
 Holds all inter-agent data in typed form. Agents receive inputs from the
-context and write outputs back. Backward-compatible: save() writes the
-same JSON files agents produce today; load() reconstructs from them.
+context and write outputs back.
+
+Two modes:
+  - GOAL: Iterative goal-oriented research (converge on quantifiable results)
+  - REPORT: Deep-dive research producing a comprehensive report on a topic
 """
 
 from __future__ import annotations
@@ -11,84 +14,132 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass, field
-
-from utils.schemas import (
-    BaselineResults,
-    MitigationResults,
-    JudgeResult,
-    AgentRunRecord,
-    VerificationRecord,
-)
+from enum import Enum
+from typing import Any
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")
 
 
-@dataclass
-class PipelineContext:
-    seed: int = 42
-    baseline: BaselineResults | None = None
-    mitigation: MitigationResults | None = None
-    paper_tex_path: str | None = None
-    paper_pdf_path: str | None = None
-    judge_results: dict[str, JudgeResult] = field(default_factory=dict)
-    agent_runs: list[AgentRunRecord] = field(default_factory=list)
-    verifications: list[VerificationRecord] = field(default_factory=list)
-    paper_quality_issues: list[str] = field(default_factory=list)
+class ResearchMode(Enum):
+    GOAL = "goal"
+    REPORT = "report"
 
-    def save(self) -> None:
-        """Persist to outputs/ as the same JSON files agents produce today."""
+
+@dataclass
+class ClaimState:
+    """Tracks the state of a single research claim through iterations."""
+    text: str
+    domain: str = ""
+    verified: bool | None = None
+    verdict: str = ""  # support | contradict | neutral
+    confidence: float = 0.0
+    evidence: str = ""
+    supporting_papers: list[str] = field(default_factory=list)
+    iteration_verified: int | None = None
+
+
+@dataclass
+class IterationResult:
+    """Result of a single research loop iteration."""
+    iteration: int
+    claims_verified: int = 0
+    claims_contradicted: int = 0
+    papers_retrieved: int = 0
+    flaws_detected: int = 0
+    critical_flaws: int = 0
+    verified_ratio: float = 0.0
+    converged: bool = False
+    evolved: bool = False
+    duration_seconds: float = 0.0
+    error: str | None = None
+
+
+@dataclass
+class ResearchContext:
+    """Shared state for the research pipeline."""
+    mode: ResearchMode = ResearchMode.GOAL
+    goal: str = ""
+    claims: list[ClaimState] = field(default_factory=list)
+    iteration_results: list[IterationResult] = field(default_factory=list)
+    research_findings: dict[str, Any] = field(default_factory=dict)
+    flaw_reports: list[dict] = field(default_factory=list)
+    cross_validation_results: list[dict] = field(default_factory=list)
+    report_sections: dict[str, str] = field(default_factory=dict)
+    converged: bool = False
+    current_iteration: int = 0
+    user_profile: dict[str, Any] = field(default_factory=dict)
+
+    def add_claim(self, text: str, domain: str = "") -> ClaimState:
+        """Add a new claim to track."""
+        claim = ClaimState(text=text, domain=domain)
+        self.claims.append(claim)
+        return claim
+
+    def verified_ratio(self) -> float:
+        """Fraction of claims that have been verified."""
+        if not self.claims:
+            return 0.0
+        verified = sum(1 for c in self.claims if c.verified is True)
+        return verified / len(self.claims)
+
+    def unverified_claims(self) -> list[ClaimState]:
+        """Return claims not yet verified."""
+        return [c for c in self.claims if c.verified is not True]
+
+    def save(self, path: str | None = None) -> None:
+        """Persist context to JSON."""
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        if self.baseline:
-            self.baseline.to_json(os.path.join(OUTPUT_DIR, "baseline_results.json"))
-        if self.mitigation:
-            self.mitigation.to_json(os.path.join(OUTPUT_DIR, "mitigation_results.json"))
+        out_path = path or os.path.join(OUTPUT_DIR, "research_context.json")
+        data = {
+            "mode": self.mode.value,
+            "goal": self.goal,
+            "claims": [
+                {
+                    "text": c.text, "domain": c.domain, "verified": c.verified,
+                    "verdict": c.verdict, "confidence": c.confidence,
+                    "evidence": c.evidence, "supporting_papers": c.supporting_papers,
+                }
+                for c in self.claims
+            ],
+            "converged": self.converged,
+            "current_iteration": self.current_iteration,
+            "iteration_count": len(self.iteration_results),
+        }
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
 
     @classmethod
-    def load(cls, seed: int = 42) -> PipelineContext:
-        """Reconstruct from existing outputs/ files (for standalone agent runs)."""
-        ctx = cls(seed=seed)
-        bl_path = os.path.join(OUTPUT_DIR, "baseline_results.json")
-        if os.path.exists(bl_path):
-            try:
-                ctx.baseline = BaselineResults.from_json(bl_path)
-            except (json.JSONDecodeError, KeyError, OSError):
-                pass
-        mit_path = os.path.join(OUTPUT_DIR, "mitigation_results.json")
-        if os.path.exists(mit_path):
-            try:
-                ctx.mitigation = MitigationResults.from_json(mit_path)
-            except (json.JSONDecodeError, KeyError, OSError):
-                pass
-        tex_path = os.path.join(OUTPUT_DIR, "paper", "paper.tex")
-        if os.path.exists(tex_path):
-            ctx.paper_tex_path = tex_path
-        pdf_path = os.path.join(OUTPUT_DIR, "paper", "paper.pdf")
-        if os.path.exists(pdf_path):
-            ctx.paper_pdf_path = pdf_path
-        return ctx
+    def load(cls, path: str | None = None) -> ResearchContext:
+        """Load context from JSON."""
+        in_path = path or os.path.join(OUTPUT_DIR, "research_context.json")
+        if not os.path.exists(in_path):
+            return cls()
+        try:
+            with open(in_path, encoding="utf-8") as f:
+                data = json.load(f)
+            ctx = cls(
+                mode=ResearchMode(data.get("mode", "goal")),
+                goal=data.get("goal", ""),
+                converged=data.get("converged", False),
+                current_iteration=data.get("current_iteration", 0),
+            )
+            for c in data.get("claims", []):
+                claim = ClaimState(
+                    text=c.get("text", ""),
+                    domain=c.get("domain", ""),
+                    verified=c.get("verified"),
+                    verdict=c.get("verdict", ""),
+                    confidence=c.get("confidence", 0.0),
+                    evidence=c.get("evidence", ""),
+                    supporting_papers=c.get("supporting_papers", []),
+                )
+                ctx.claims.append(claim)
+            return ctx
+        except (json.JSONDecodeError, KeyError, OSError):
+            return cls()
 
-    def get_best_eod(self) -> float | None:
-        """Extract the best (lowest) |EOD| from mitigation results."""
-        if not self.mitigation:
-            return None
-        all_metrics = self.mitigation.baseline_metrics + self.mitigation.mitigation_metrics
-        if not all_metrics:
-            return None
-        return min(abs(m.equalized_odds_diff) for m in all_metrics)
 
-    def get_best_dpd(self) -> float | None:
-        """Extract the best (lowest) |DPD| from mitigation results."""
-        if not self.mitigation:
-            return None
-        all_metrics = self.mitigation.baseline_metrics + self.mitigation.mitigation_metrics
-        if not all_metrics:
-            return None
-        return min(abs(m.demographic_parity_diff) for m in all_metrics)
+# Backward-compat alias for legacy code
+PipelineContext = ResearchContext
 
-    def get_eod_compliant_models(self) -> list[str]:
-        """Return model names that achieve |EOD| <= 0.05."""
-        if not self.mitigation:
-            return []
-        all_metrics = self.mitigation.baseline_metrics + self.mitigation.mitigation_metrics
-        return [m.model for m in all_metrics if not m.eu_ai_act_eod_violation]

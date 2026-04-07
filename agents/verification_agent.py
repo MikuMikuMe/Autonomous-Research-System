@@ -79,39 +79,29 @@ def generate_verification_code(claim: str, data_context: dict | str) -> str | No
 
 def run_verification_code(code: str, data_json: dict | None = None) -> dict:
     """
-    Run generated code in a sandboxed subprocess.
+    Run generated code in a hardened sandbox with resource limits.
     Returns {"verified": bool, "evidence": str, "error": str | None, "code": str}
     """
+    from utils.sandbox import run_sandboxed
+
     result = {"verified": None, "evidence": "", "error": None, "code": code}
 
-    data_path = None
-    if data_json is not None:
-        fd, data_path = tempfile.mkstemp(suffix=".json")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data_json, f)
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-        if data_path:
-            f.write("import json\n")
-            f.write(f"with open({repr(data_path)}, encoding='utf-8') as _f:\n")
-            f.write("    data = json.load(_f)\n\n")
-        f.write(code)
-        tmp_path = f.name
-
     try:
-        proc = subprocess.run(
-            [sys.executable, tmp_path],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
+        sandbox_result = run_sandboxed(
+            code,
             timeout=VERIFICATION_TIMEOUT,
-            env={**os.environ, "PYTHONPATH": PROJECT_ROOT},
+            max_memory_mb=512,
+            data_json=data_json,
         )
-        stdout = proc.stdout or ""
-        stderr = proc.stderr or ""
 
-        if proc.returncode != 0:
-            result["error"] = stderr or stdout or f"Exit code {proc.returncode}"
+        stdout = sandbox_result.stdout
+        stderr = sandbox_result.stderr
+
+        if sandbox_result.timed_out:
+            result["error"] = f"Sandbox timeout after {VERIFICATION_TIMEOUT}s"
+            result["verified"] = False
+        elif sandbox_result.returncode != 0:
+            result["error"] = stderr or stdout or f"Exit code {sandbox_result.returncode}"
             result["verified"] = False
         else:
             for line in stdout.strip().split("\n"):
@@ -122,25 +112,12 @@ def run_verification_code(code: str, data_json: dict | None = None) -> dict:
                     result["evidence"] = line.split("=", 1)[1].strip()
 
         if result["verified"] is None:
-            result["verified"] = proc.returncode == 0
+            result["verified"] = sandbox_result.returncode == 0
             result["evidence"] = stdout[:500] if stdout else "No VERIFIED= line in output"
 
-    except subprocess.TimeoutExpired:
-        result["error"] = f"Timeout after {VERIFICATION_TIMEOUT}s"
-        result["verified"] = False
     except Exception as e:
         result["error"] = str(e)
         result["verified"] = False
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        if data_path and os.path.exists(data_path):
-            try:
-                os.unlink(data_path)
-            except OSError:
-                pass
 
     return result
 

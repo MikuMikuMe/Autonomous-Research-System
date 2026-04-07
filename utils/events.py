@@ -1,8 +1,8 @@
 """
-Typed EventBus for the Bias Audit Pipeline.
+Typed EventBus for the Autonomous Research System.
 
-Replaces raw event_queue.put({"type": "agent_log", ...}) with typed
-PipelineEvent dataclasses and an EventBus with subscriber support.
+Replaces raw event_queue.put({"type": "..."}) with typed PipelineEvent
+dataclasses and an EventBus with subscriber support.
 Bridges to the existing GUI queue via connect_queue() for backward compat.
 """
 

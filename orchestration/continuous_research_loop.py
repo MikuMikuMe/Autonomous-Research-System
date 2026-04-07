@@ -72,6 +72,7 @@ def run_research_loop(
     compact_every: int | None = None,
     flaw_halt_severity: str | None = None,
     quiet: bool = False,
+    mode: str = "goal",
 ) -> dict:
     """Run the continuous research loop.
 
@@ -86,6 +87,7 @@ def run_research_loop(
         flaw_halt_severity: "critical"|"high"|"any"|"none" — severity that blocks
                             convergence.
         quiet:          Suppress progress output.
+        mode:           "goal" for goal-oriented convergence, "report" for deep-dive.
 
     Returns:
         Report dict saved to outputs/research_loop_report.json.
@@ -97,9 +99,16 @@ def run_research_loop(
     compact_every = compact_every or yaml_cfg.get("compact_every", 3)
     flaw_halt_severity = flaw_halt_severity or yaml_cfg.get("flaw_halt_severity", "critical")
 
+    # Report mode: lower convergence bar, focus on breadth
+    if mode == "report":
+        converge_threshold = min(converge_threshold, 0.70)
+        if max_iterations < 3:
+            max_iterations = 5
+
     overall_start = time.time()
     report: dict = {
         "goal": goal,
+        "mode": mode,
         "claims_source": str(claims_source) if claims_source else "idea_input.json",
         "max_iterations": max_iterations,
         "converge_threshold": converge_threshold,
@@ -125,6 +134,16 @@ def run_research_loop(
         _print(quiet, f"  [ABORT] Claims file not found: {exc}")
         report["error"] = str(exc)
         return _finalise(report, overall_start, quiet)
+
+    if not claims and goal:
+        _print(quiet, "  [DISCOVER] No claims file provided — generating initial claims from goal...")
+        try:
+            from agents.idea_input_agent import extract_idea
+            idea = extract_idea(goal)
+            _print(quiet, f"  [DISCOVER] Idea extracted: {idea.get('title', 'N/A')}")
+            claims = load_claims(None)  # reload from outputs/idea_input.json
+        except Exception as exc:
+            _print(quiet, f"  [WARN] Idea extraction failed: {exc}")
 
     if not claims:
         _print(quiet, "  [ABORT] No claims found. Provide a claims file or run idea_input_agent first.")

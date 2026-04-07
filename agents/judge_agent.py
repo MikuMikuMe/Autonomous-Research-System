@@ -10,7 +10,14 @@ import os
 import json
 import re
 
-from utils.schemas import BaselineResults, MitigationResults, JudgeResult, ModelMetrics
+from utils.schemas import JudgeResult
+
+try:
+    from utils.schemas import BaselineResults, MitigationResults, ModelMetrics  # type: ignore[attr-defined]
+except ImportError:  # removed in research-system refactor
+    BaselineResults = None  # type: ignore[assignment,misc]
+    MitigationResults = None  # type: ignore[assignment,misc]
+    ModelMetrics = None  # type: ignore[assignment,misc]
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(PROJECT_ROOT, "outputs")

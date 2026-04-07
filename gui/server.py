@@ -1,5 +1,11 @@
 """
-FastAPI server for Bias Audit Pipeline GUI — WebSocket events, REST API, static files.
+FastAPI server for Autonomous Research System GUI.
+
+Supports two modes:
+  - Goal-oriented: iterative research toward a quantifiable goal
+  - Report: deep-dive research producing a comprehensive report
+
+WebSocket streaming, REST API, static files.
 """
 
 import asyncio
@@ -14,52 +20,69 @@ from fastapi.staticfiles import StaticFiles
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
 OUTPUTS_DIR = SCRIPT_DIR / "outputs"
-FIGURES_DIR = OUTPUTS_DIR / "figures"
-PAPER_DIR = OUTPUTS_DIR / "paper"
 IDEA_UPLOADS_DIR = OUTPUTS_DIR / "idea_uploads"
 IDEA_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Bias Audit Pipeline")
+app = FastAPI(title="Autonomous Research System")
 
-# Static files
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Static files — serve React build if it exists, otherwise fallback to legacy static
+FRONTEND_BUILD = Path(__file__).resolve().parent / "frontend" / "dist"
+STATIC_DIR = FRONTEND_BUILD if FRONTEND_BUILD.is_dir() else Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+# Serve favicon and /assets/* from the frontend dist directory at root
+if FRONTEND_BUILD.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_BUILD / "assets")), name="assets")
 
-# Pipeline state
+# Research state
 _event_queue: queue.Queue = queue.Queue()
-_pipeline_thread = None
+_research_thread = None
 _ws_clients: list = []
 _consumer_task = None
 
-# Idea verification state (separate thread + queue, shared WS broadcast)
+# Idea verification state
 _idea_queue: queue.Queue = queue.Queue()
 _idea_threads: dict[str, threading.Thread] = {}
 _idea_consumer_task = None
 
 
-def _run_pipeline():
-    """Run pipeline in thread; events go to _event_queue."""
+def _run_research(mode: str = "goal", goal: str = "", claims_source: str | None = None,
+                  max_iterations: int = 10, threshold: float = 0.9):
+    """Run research loop in thread; events go to _event_queue."""
     try:
-        from gui.streaming_orchestrator import run_pipeline
-        run_pipeline(_event_queue)
+        from orchestration.continuous_research_loop import run_research_loop
+        _event_queue.put({
+            "type": "research_started",
+            "mode": mode,
+            "goal": goal,
+        })
+        report = run_research_loop(
+            claims_source=claims_source,
+            goal=goal or "Verify and refine research claims",
+            max_iterations=max_iterations,
+            converge_threshold=threshold,
+            mode=mode,
+        )
+        _event_queue.put({
+            "type": "research_finished",
+            "converged": report.get("converged", False),
+            "iterations": report.get("iterations_completed", 0),
+            "report": report,
+        })
     except Exception as e:
-        try:
-            _event_queue.put({
-                "type": "agent_log",
-                "agent": "",
-                "line": f"[ERROR] Pipeline failed to start: {e}",
-            })
-            _event_queue.put({
-                "type": "pipeline_finished",
-                "all_passed": False,
-                "results": {},
-            })
-        except Exception:
-            pass
+        _event_queue.put({
+            "type": "research_error",
+            "error": str(e),
+        })
+        _event_queue.put({
+            "type": "research_finished",
+            "converged": False,
+            "iterations": 0,
+            "report": {"error": str(e)},
+        })
 
 
 async def _event_consumer():
-    """Consume events from queue and broadcast to WebSocket clients. Runs until pipeline_finished."""
+    """Consume events from queue and broadcast to WebSocket clients."""
     while True:
         try:
             event = await asyncio.to_thread(_event_queue.get)
@@ -69,7 +92,7 @@ async def _event_consumer():
                     await ws.send_text(msg)
                 except Exception:
                     pass
-            if event.get("type") == "pipeline_finished":
+            if event.get("type") in ("research_finished", "pipeline_finished"):
                 break
         except Exception:
             break
@@ -91,7 +114,6 @@ async def _idea_consumer():
 
 
 def _ensure_consumer_running():
-    """Start consumer task if pipeline is running and consumer not active."""
     global _consumer_task
     if _consumer_task and not _consumer_task.done():
         return
@@ -99,7 +121,6 @@ def _ensure_consumer_running():
 
 
 def _ensure_idea_consumer_running():
-    """Start the idea verification event consumer if not already running."""
     global _idea_consumer_task
     if _idea_consumer_task and not _idea_consumer_task.done():
         return
@@ -108,20 +129,30 @@ def _ensure_idea_consumer_running():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    global _pipeline_thread, _consumer_task
+    global _research_thread, _consumer_task
     await websocket.accept()
     _ws_clients.append(websocket)
-    _ensure_idea_consumer_running()  # Keep idea consumer alive as long as clients are connected
+    _ensure_idea_consumer_running()
     try:
         while True:
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
-                if msg.get("action") == "run":
-                    running = _pipeline_thread and _pipeline_thread.is_alive()
+                if msg.get("action") == "start_research":
+                    running = _research_thread and _research_thread.is_alive()
                     if not running:
-                        _pipeline_thread = threading.Thread(target=_run_pipeline)
-                        _pipeline_thread.start()
+                        _research_thread = threading.Thread(
+                            target=_run_research,
+                            kwargs={
+                                "mode": msg.get("mode", "goal"),
+                                "goal": msg.get("goal", ""),
+                                "claims_source": msg.get("claims_source"),
+                                "max_iterations": msg.get("max_iterations", 10),
+                                "threshold": msg.get("threshold", 0.9),
+                            },
+                            daemon=True,
+                        )
+                        _research_thread.start()
                         _ensure_consumer_running()
             except json.JSONDecodeError:
                 pass
@@ -130,54 +161,82 @@ async def websocket_endpoint(websocket: WebSocket):
             _ws_clients.remove(websocket)
 
 
-@app.post("/run")
-async def start_pipeline():
-    """Start the pipeline. Events stream via WebSocket."""
-    global _pipeline_thread
-    if _pipeline_thread and _pipeline_thread.is_alive():
-        return {"status": "already_running"}
-    _pipeline_thread = threading.Thread(target=_run_pipeline)
-    _pipeline_thread.start()
-    _ensure_consumer_running()  # Must start consumer so events reach WebSocket clients
-    return {"status": "started"}
+@app.post("/api/research/start")
+async def start_research(
+    mode: str = "goal",
+    goal: str = "",
+    claims_source: str | None = None,
+    max_iterations: int = 10,
+    threshold: float = 0.9,
+):
+    """Start a research session."""
+    global _research_thread
+    if _research_thread and _research_thread.is_alive():
+        return JSONResponse({"status": "already_running"})
+    _research_thread = threading.Thread(
+        target=_run_research,
+        kwargs={
+            "mode": mode,
+            "goal": goal,
+            "claims_source": claims_source,
+            "max_iterations": max_iterations,
+            "threshold": threshold,
+        },
+        daemon=True,
+    )
+    _research_thread.start()
+    _ensure_consumer_running()
+    return JSONResponse({"status": "started", "mode": mode})
 
 
-@app.get("/api/outputs/baseline")
-async def get_baseline():
-    path = OUTPUTS_DIR / "baseline_results.json"
+@app.get("/api/outputs/research")
+async def get_research_report():
+    """Get the latest research loop report."""
+    path = OUTPUTS_DIR / "research_loop_report.json"
     if not path.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     with open(path, encoding="utf-8") as f:
         return JSONResponse(json.load(f))
 
 
-@app.get("/api/outputs/mitigation")
-async def get_mitigation():
-    path = OUTPUTS_DIR / "mitigation_results.json"
+@app.get("/api/outputs/cross_validation")
+async def get_cross_validation():
+    """Get the latest cross-validation report."""
+    path = OUTPUTS_DIR / "cross_validation_report.json"
     if not path.exists():
         return JSONResponse({"error": "not found"}, status_code=404)
     with open(path, encoding="utf-8") as f:
         return JSONResponse(json.load(f))
 
 
-@app.get("/api/outputs/paper")
-async def get_paper():
-    path = OUTPUTS_DIR / "paper" / "paper.tex"
+@app.get("/api/outputs/flaws")
+async def get_flaws():
+    """Get the latest flaw report."""
+    path = OUTPUTS_DIR / "flaw_report.json"
     if not path.exists():
-        path = OUTPUTS_DIR / "paper_draft.md"
-    if not path.exists():
-        return PlainTextResponse("Paper not yet generated.", status_code=404)
+        return JSONResponse({"error": "not found"}, status_code=404)
     with open(path, encoding="utf-8") as f:
-        media = "text/x-latex" if str(path).endswith(".tex") else "text/markdown"
-        return PlainTextResponse(f.read(), media_type=media)
+        return JSONResponse(json.load(f))
 
 
-@app.get("/api/outputs/paper.pdf")
-async def get_paper_pdf():
-    path = PAPER_DIR / "paper.pdf"
+@app.get("/api/outputs/verification")
+async def get_verification():
+    """Get the latest verification report."""
+    path = OUTPUTS_DIR / "verification_report.json"
     if not path.exists():
-        return JSONResponse({"error": "PDF not found"}, status_code=404)
-    return FileResponse(path, media_type="application/pdf", filename="paper.pdf")
+        return JSONResponse({"error": "not found"}, status_code=404)
+    with open(path, encoding="utf-8") as f:
+        return JSONResponse(json.load(f))
+
+
+@app.get("/api/providers")
+async def get_providers():
+    """List available LLM providers."""
+    try:
+        from utils.llm_base import list_providers
+        return JSONResponse({"providers": list_providers()})
+    except Exception:
+        return JSONResponse({"providers": []})
 
 
 @app.get("/api/memory/journey")
@@ -186,31 +245,69 @@ async def get_memory_journey():
         from agents.memory_agent import MemoryStore
     except ImportError:
         return JSONResponse({"error": "memory unavailable"}, status_code=503)
-
     store = MemoryStore()
     try:
-        return JSONResponse(store.journey_summary())
+        return JSONResponse(store.research_journey_summary())
+    except AttributeError:
+        try:
+            return JSONResponse(store.journey_summary())
+        except Exception:
+            return JSONResponse({"error": "no summary available"}, status_code=503)
     finally:
         store.close()
 
 
-@app.get("/api/outputs/figures/{name}")
-async def get_figure(name: str):
-    # Sanitize: only allow alphanumeric and underscore
-    safe = "".join(c for c in name if c.isalnum() or c in "._-")
-    if safe != name:
-        return JSONResponse({"error": "invalid name"}, status_code=400)
-    for base, ext in [(FIGURES_DIR, ".png"), (FIGURES_DIR, ".pdf"), (OUTPUTS_DIR, ".png")]:
-        path = base / f"{name}{ext}" if not name.endswith(ext) else base / name
-        if path.exists():
-            media = "image/png" if ".png" in str(path) else "application/pdf"
-            return FileResponse(path, media_type=media)
-    return JSONResponse({"error": "not found"}, status_code=404)
+@app.get("/api/memory/knowledge")
+async def get_memory_knowledge():
+    """Get knowledge entries from memory."""
+    try:
+        from agents.memory_agent import MemoryStore
+    except ImportError:
+        return JSONResponse({"error": "memory unavailable"}, status_code=503)
+    store = MemoryStore()
+    try:
+        knowledge = store.get_relevant_knowledge("", limit=50)
+        return JSONResponse({"entries": knowledge})
+    except Exception:
+        return JSONResponse({"entries": []})
+    finally:
+        store.close()
+
+
+@app.get("/api/memory/pitfalls")
+async def get_memory_pitfalls():
+    """Get known pitfalls from memory."""
+    try:
+        from agents.memory_agent import MemoryStore
+    except ImportError:
+        return JSONResponse({"error": "memory unavailable"}, status_code=503)
+    store = MemoryStore()
+    try:
+        pitfalls = store.get_known_pitfalls(limit=50)
+        return JSONResponse({"pitfalls": pitfalls})
+    except Exception:
+        return JSONResponse({"pitfalls": []})
+    finally:
+        store.close()
+
+
+@app.get("/favicon.svg")
+async def favicon():
+    """Serve favicon from frontend dist."""
+    path = FRONTEND_BUILD / "favicon.svg"
+    if path.exists():
+        return FileResponse(path, media_type="image/svg+xml")
+    return PlainTextResponse("not found", status_code=404)
 
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    """Serve the frontend."""
+    # Try React build first, fall back to legacy static
+    for candidate in [FRONTEND_BUILD / "index.html", Path(__file__).resolve().parent / "static" / "index.html"]:
+        if candidate.exists():
+            return FileResponse(candidate)
+    return PlainTextResponse("Frontend not found. Run: cd gui/frontend && npm install && npm run build", status_code=404)
 
 
 # ---------------------------------------------------------------------------

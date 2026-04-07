@@ -20,7 +20,6 @@ from datetime import datetime
 
 from utils.schemas import (
     AgentRunRecord,
-    ModelMetrics,
     RunRecord,
     VerificationRecord,
 )
@@ -172,20 +171,20 @@ class MemoryStore:
     # ================================================================
 
     def persist_run(self, record: RunRecord) -> int:
-        """Insert a full RunRecord (run + agent_runs + metrics + verifications)."""
+        """Insert a full RunRecord (run + agent_runs + verifications)."""
         cur = self.db.execute(
             """INSERT INTO runs (timestamp, seed, all_passed, duration_s,
                best_eod, best_dpd, eod_compliant_models, paper_quality_issues)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 record.timestamp,
-                record.seed,
+                0,  # seed field removed from RunRecord
                 record.all_passed,
                 record.total_duration_seconds,
-                record.best_eod,
-                record.best_dpd,
-                json.dumps(record.eod_compliant_models),
-                json.dumps(record.paper_quality_issues),
+                None,  # best_eod removed
+                None,  # best_dpd removed
+                json.dumps([]),
+                json.dumps([]),
             ),
         )
         run_id = cur.lastrowid
@@ -206,12 +205,6 @@ class MemoryStore:
                 ),
             )
 
-        for m in record.metrics:
-            is_baseline = m.model in {
-                bm.model for bm in (record.metrics if not hasattr(record, '_baseline_model_names') else [])
-            }
-            self._insert_metric(run_id, m, is_baseline)
-
         for v in record.verifications:
             self.db.execute(
                 """INSERT INTO verifications (run_id, claim, verified, evidence, error)
@@ -225,38 +218,24 @@ class MemoryStore:
     def persist_run_from_context(
         self,
         ctx,
-        seed: int,
-        all_passed: bool,
-        total_duration: float,
-        agent_runs: list[AgentRunRecord],
+        seed: int = 0,
+        all_passed: bool = False,
+        total_duration: float = 0.0,
+        agent_runs: list[AgentRunRecord] | None = None,
         verifications: list[VerificationRecord] | None = None,
     ) -> int:
-        """Build a RunRecord from a PipelineContext and persist it."""
-        all_metrics: list[ModelMetrics] = []
-        baseline_names: set[str] = set()
-        if ctx.mitigation:
-            for m in ctx.mitigation.baseline_metrics:
-                all_metrics.append(m)
-                baseline_names.add(m.model)
-            for m in ctx.mitigation.mitigation_metrics:
-                all_metrics.append(m)
-        elif ctx.baseline:
-            for m in ctx.baseline.baseline_metrics:
-                all_metrics.append(m)
-                baseline_names.add(m.model)
+        """Persist a research run record. Works with both legacy and new contexts."""
+        agent_runs = agent_runs or []
+        verifications = verifications or getattr(ctx, "verifications", []) or []
 
         record = RunRecord(
             timestamp=datetime.now().isoformat(),
-            seed=seed,
             all_passed=all_passed,
             total_duration_seconds=total_duration,
+            mode=getattr(ctx, "mode", "goal") if hasattr(ctx, "mode") else "goal",
+            goal=getattr(ctx, "goal", "") if hasattr(ctx, "goal") else "",
             agents=agent_runs,
-            best_eod=ctx.get_best_eod(),
-            best_dpd=ctx.get_best_dpd(),
-            eod_compliant_models=ctx.get_eod_compliant_models(),
-            paper_quality_issues=ctx.paper_quality_issues,
-            verifications=verifications or ctx.verifications,
-            metrics=all_metrics,
+            verifications=verifications if isinstance(verifications, list) else [],
         )
 
         cur = self.db.execute(
@@ -264,10 +243,10 @@ class MemoryStore:
                best_eod, best_dpd, eod_compliant_models, paper_quality_issues)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                record.timestamp, record.seed, record.all_passed,
-                record.total_duration_seconds, record.best_eod, record.best_dpd,
-                json.dumps(record.eod_compliant_models),
-                json.dumps(record.paper_quality_issues),
+                record.timestamp, seed, record.all_passed,
+                record.total_duration_seconds, None, None,
+                json.dumps([]),
+                json.dumps([]),
             ),
         )
         run_id = cur.lastrowid
@@ -287,33 +266,18 @@ class MemoryStore:
                 ),
             )
 
-        for m in all_metrics:
-            is_baseline = m.model in baseline_names
-            self._insert_metric(run_id, m, is_baseline)
-
-        for v in (verifications or ctx.verifications):
-            self.db.execute(
-                """INSERT INTO verifications (run_id, claim, verified, evidence, error)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (run_id, v.claim, v.verified, v.evidence, v.error),
-            )
+        for v in verifications:
+            if isinstance(v, VerificationRecord):
+                self.db.execute(
+                    """INSERT INTO verifications (run_id, claim, verified, evidence, error)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (run_id, v.claim, v.verified, v.evidence, v.error),
+                )
 
         self.db.commit()
         return run_id
 
-    def _insert_metric(self, run_id: int, m: ModelMetrics, is_baseline: bool) -> None:
-        self.db.execute(
-            """INSERT INTO metrics (run_id, model, is_baseline, accuracy, f1_score,
-               auc, fpr, dpd, eod, di, spd_violation, eod_violation)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                run_id, m.model, is_baseline,
-                m.accuracy, m.f1_score, m.auc, m.false_positive_rate,
-                m.demographic_parity_diff, m.equalized_odds_diff,
-                m.disparate_impact_ratio,
-                m.eu_ai_act_spd_violation, m.eu_ai_act_eod_violation,
-            ),
-        )
+    # _insert_metric removed — no longer used in research pipeline
 
     # ================================================================
     # Query helpers for optimizer
