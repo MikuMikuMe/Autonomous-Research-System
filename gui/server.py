@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -24,6 +25,16 @@ IDEA_UPLOADS_DIR = OUTPUTS_DIR / "idea_uploads"
 IDEA_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(title="Autonomous Research System")
+
+# CORS — allow React dev server
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000",
+                   "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Static files — serve React build if it exists, otherwise fallback to legacy static
 FRONTEND_BUILD = Path(__file__).resolve().parent / "frontend" / "dist"
@@ -308,6 +319,11 @@ async def index():
         if candidate.exists():
             return FileResponse(candidate)
     return PlainTextResponse("Frontend not found. Run: cd gui/frontend && npm install && npm run build", status_code=404)
+
+
+# ---------------------------------------------------------------------------
+# Generalized Research API (used by React frontend)
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

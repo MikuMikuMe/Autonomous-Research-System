@@ -607,8 +607,16 @@ def run_self_check() -> SelfCheckReport:
         "agents.gap_check_agent", "agents.coverage_agent",
         "agents.topic_coverage_agent",
     ]
+    # Legacy bias-pipeline agents are optional (need kagglehub, imblearn, etc.)
+    optional_modules = [
+        "agents.detection_agent", "agents.mitigation_agent", "agents.auditing_agent",
+    ]
     for mod in core_modules:
         all_checks.append(_check_agent_importable(mod))
+    for mod in optional_modules:
+        check = _check_agent_importable(mod)
+        check.phase = "OBSERVE"  # non-blocking phase so missing deps don't prevent autonomy
+        all_checks.append(check)
     all_checks.append(_check_config_exists())
     all_checks.append(_check_prompts_exist())
     all_checks.append(_check_dependencies())

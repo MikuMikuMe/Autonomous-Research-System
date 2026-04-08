@@ -18,6 +18,8 @@ llm:
     gemini: gemini-2.5-flash
     openai: gpt-4o
     anthropic: claude-sonnet-4-20250514
+  temperature: 0.2
+  max_output_tokens: 8192
 
 # Research agents used in both modes
 research_agents:
@@ -41,6 +43,14 @@ optimizer:
   run_after_research: true
   apply_proposals: false
 
+# Web search configuration
+search:
+  provider: tavily           # tavily | google | none
+  tavily_api_key: null       # or set TAVILY_API_KEY env var
+  max_results: 10
+  include_academic: true     # also search arXiv + Semantic Scholar
+  include_web: true          # Tavily web search
+
 # Research loop settings (shared by both modes)
 research_loop:
   max_iterations: 10
@@ -48,6 +58,8 @@ research_loop:
   evolve_every: 2
   compact_every: 3
   flaw_halt_severity: critical  # critical|high|any|none
+  auto_discover_techniques: true
+  technique_search_queries: 3
 
 # Mode-specific overrides
 modes:
@@ -60,12 +72,36 @@ modes:
     converge_threshold: 0.70
     description: "Deep-dive research producing a comprehensive report"
 
+# Sandbox configuration for code execution
+sandbox:
+  enabled: true
+  timeout_seconds: 120
+  max_memory_mb: 2048
+  use_docker: false          # true = run in Docker container
+  docker_image: python:3.12-slim
+  allowed_imports:
+    - numpy
+    - pandas
+    - scikit-learn
+    - scipy
+    - matplotlib
+    - json
+    - math
+    - statistics
+
 # Tracing / observability
 tracing:
   enabled: true  # Override with TRACE_ENABLED=false
   service_name: autonomous-research
+  provider: opentelemetry    # opentelemetry | langsmith
+  langsmith_project: autonomous-research
 
-# Sandbox settings for code execution
-sandbox:
-  timeout: 30
-  max_memory_mb: 512
+# MCP (Model Context Protocol) integration
+mcp:
+  enabled: false
+  servers: []
+
+# Telegram bot
+telegram:
+  enabled: false
+  # Set TELEGRAM_BOT_TOKEN in .env

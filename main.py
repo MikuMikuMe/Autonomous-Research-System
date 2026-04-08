@@ -32,9 +32,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     p.add_argument("--topic", default=None, help="[report] Topic for deep-dive research")
     p.add_argument("--claims", "-c", default=None, help="Path to claims file (JSON or text)")
-    p.add_argument("--iterations", "-n", type=int, default=None, help="Max iterations")
-    p.add_argument("--threshold", "-t", type=float, default=None, help="Convergence threshold (0.0-1.0)")
-    p.add_argument("--flaw-halt", default=None, choices=["critical", "high", "any", "none"],
+    p.add_argument("--iterations", "-n", type=int, default=5, help="Max iterations (default: 5)")
+    p.add_argument("--threshold", "-t", type=float, default=0.85, help="Convergence threshold (default: 0.85)")
+    p.add_argument("--flaw-halt", default="critical", choices=["critical", "high", "any", "none"],
                     help="Flaw severity that blocks convergence")
     p.add_argument("--quiet", "-q", action="store_true", help="Suppress output")
     p.add_argument("--help", "-h", action="help", help="Show this help message and exit")
@@ -51,7 +51,7 @@ if __name__ == "__main__":
         report = run_research_loop(
             claims_source=args.claims,
             goal=f"Produce a comprehensive research report on: {topic}",
-            max_iterations=args.iterations or 5,
+            max_iterations=args.iterations,
             converge_threshold=args.threshold,
             flaw_halt_severity=args.flaw_halt,
             quiet=args.quiet,
@@ -72,5 +72,3 @@ if __name__ == "__main__":
             mode="goal",
         )
         sys.exit(0 if report.get("converged") or not report.get("error") else 1)
-
-
